@@ -76,6 +76,17 @@ Agora dá para puxar dados do Power BI pela extensão em vez de print manual.
 
 ## FEITO NESTA SESSÃO (2026-09-10)
 
+### Commit `85fd382` — Títulos = menu; Anatomia sempre com todos os motivos
+- **Títulos:** `st.title()` de cada tela passa a ser igual ao rótulo do menu
+  (Painel / Motivos / Anatomia da perda / Evitável x estrutural / Regras e
+  simulação). A "pergunta" antiga virou início da legenda.
+- **Anatomia:** escopo "Motivos" abre em **Todos** (era Vencido). Bloco fixo
+  **"Todos os motivos no recorte"** (não é mais expander) — tabela + barra do
+  conjunto completo de motivos da loja/mês, **ignorando** o filtro de
+  escopo/status. Coluna/cor "No escopo" marca o que entra na análise abaixo.
+  Uma linha grande (ex. marketing R$ 10,5 mil) nunca some, mesmo analisando só
+  vencido. `vfull = _vclass_recorte(_cats_do_escopo("todos"))`.
+
 ### Commit `f30429b` — Anatomia: motivo flexível + "ver tudo" (feedback do Gabriel)
 Gabriel comparou o relatório do sistema (loja 16, ago, AÇÃO DE MARKETING → item
 LANCETA ACCU CHECK R$ 10.029,36) e não achou o item na Anatomia. Causa: o filtro
