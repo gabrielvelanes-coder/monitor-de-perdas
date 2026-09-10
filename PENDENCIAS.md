@@ -19,6 +19,24 @@ Enquanto não conectar, dados do Power BI entram por print/export manual.
 
 ## FEITO NESTA SESSÃO (2026-09-10)
 
+### Commit `46d77bf` — Anatomia: loja, curva e gráficos clicáveis
+- `core.macro_categoria()` simplificada pela regra do Gabriel: no nível 1 da
+  árvore, só GENÉRICO / SIMILAR / PROPAGADO é `medicamento`; qualquer outra
+  categoria é `nao-medicamento`; sem categoria é `sem classificacao`. Sumiu o
+  balde `indefinido` (CAMPANHA, HIGIENE PESSOAL/BUCAL, MUNDO HOMEM, PRIMEIROS
+  SOCORROS caíram em não-medicamento). Efeito no vencido jan–set: medicamento
+  R$ 219.827 · não-medicamento R$ 146.589 · sem classificação R$ 22.039.
+  **A confirmar com o Gabriel:** os R$ 22 mil "sem classificação" são itens com
+  `classif` em branco no cadastro — mantidos num balde à parte (não viraram
+  não-medicamento). Se ele quiser, é 1 linha juntar.
+- `tela_anatomia`: multiselect de **Lojas** (vazio = todas) ao lado de Meses;
+  seletor de curva virou `st.radio` com `key` (o `segmented_control` não
+  alternava) e agora rege o gráfico "Tem curva?"; os 3 gráficos (categoria /
+  curva / tempo parado) viraram clicáveis via `alt.selection_point` +
+  `st.altair_chart(on_select="rerun")` — clicar numa barra filtra a tabela de
+  Produtos no rodapé, com título e legenda dizendo de qual gráfico e qual valor
+  veio. Tabela ganhou coluna "Tempo parado" e download CSV.
+
 ### Commit `a787f5f` — tela "Motivos" (de-para de escopo)
 Entregue conforme a spec que estava aqui. `core.py`: `classe_motivo(motivo_cat)`
 + `CLASSES_PERDA` (3 baldes: `Vencido` / `Outra perda real` / `Não é perda`,
