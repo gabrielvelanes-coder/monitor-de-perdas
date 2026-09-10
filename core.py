@@ -170,6 +170,8 @@ def load_perdas(src) -> pd.DataFrame:
         df["produto"] = ""
     if "itens" not in df.columns:
         df["itens"] = pd.NA
+    if "valor_unit" not in df.columns:
+        df["valor_unit"] = pd.NA
 
     df["produto"] = df["produto"].astype(str).str.strip()
     df["motivo"] = df["motivo"].astype(str).str.strip()
@@ -522,7 +524,7 @@ BALDES = {
 
 
 def classificar_vencidos(enr: pd.DataFrame) -> pd.DataFrame:
-    """Adiciona: macro (medicamento x não), cat1/cat2 da árvore, balde, evitavel_pdv."""
+    """Adiciona: macro (medicamento x não), cat1/cat2 da árvore, balde."""
     m = enr.copy()
     niveis = m["classif"].map(_arvore_niveis)
     m["cat1"] = niveis.map(lambda t: t[0] or "Sem categoria")
@@ -549,7 +551,6 @@ def classificar_vencidos(enr: pd.DataFrame) -> pd.DataFrame:
 
     m["balde"] = [balde(i) for i in range(len(m))]
     m["balde_label"] = m["balde"].map(lambda b: BALDES[b][0])
-    m["evitavel_pdv"] = (curva.isin(list("ABCD"))) & (mvm > 0) & (ult <= 90)
     return m
 
 
@@ -566,16 +567,16 @@ def resumo_baldes(vclass: pd.DataFrame, n_meses: int = 1) -> pd.DataFrame:
 
 
 def frase_diagnostico(mensal: pd.DataFrame, vclass: pd.DataFrame,
-                      escopo: str, meta: float = 0.005,
+                      meta: float = 0.005,
                       faixa=(0.003, 0.008)) -> tuple[str, str]:
-    """(nivel, frase). nivel ∈ {ok, atencao, critico}."""
+    """(nivel, frase). nivel ∈ {ok, atencao, critico}, medido contra a `meta`."""
     if mensal.empty:
         return "sem_dados", "Informe o faturamento para avaliar a taxa."
     taxa = mensal["taxa"].mean()
     lo, hi = faixa
-    if taxa <= hi * 0.85:          # folga: ~0,68% ainda é "ok"
+    if taxa <= meta * 1.05:       # 5% de folga: bater a meta na margem ainda é "ok"
         nivel = "ok"
-    elif taxa <= hi:
+    elif taxa <= meta * 1.3:      # até 30% acima da meta = atenção
         nivel = "atencao"
     else:
         nivel = "critico"
@@ -587,11 +588,17 @@ def frase_diagnostico(mensal: pd.DataFrame, vclass: pd.DataFrame,
     cat_nome = top_cat.index[0] if len(top_cat) else "—"
     cat_pct = (top_cat.iloc[0] / tot) if len(top_cat) else 0
 
-    faixa_txt = {"ok": "dentro da faixa normal de varejo farma (0,3%–0,8%)",
-                 "atencao": "no limite superior da faixa de mercado (0,3%–0,8%)",
-                 "critico": "acima da faixa normal de varejo farma (0,3%–0,8%)"}[nivel]
+    meta_txt = {"ok": f"na meta de {meta*100:.2f}% (ou abaixo)",
+                "atencao": f"até 30% acima da meta de {meta*100:.2f}%",
+                "critico": f"acima da meta de {meta*100:.2f}%"}[nivel]
+    if taxa > hi:
+        banda_txt = "e acima da faixa de mercado de varejo farma (0,3%–0,8%)"
+    elif taxa < lo:
+        banda_txt = "e abaixo da faixa de mercado de varejo farma (0,3%–0,8%)"
+    else:
+        banda_txt = "e dentro da faixa de mercado de varejo farma (0,3%–0,8%)"
     return nivel, (
-        f"Taxa média de {taxa*100:.2f}% do faturamento — {faixa_txt}. "
+        f"Taxa média de {taxa*100:.2f}% do faturamento — {meta_txt}, {banda_txt}. "
         f"{pct_med*100:.0f}% da perda é medicamento e {cat_pct*100:.0f}% vem de "
         f"{cat_nome.title()}. Apenas {pct_pdv*100:.0f}% é item com giro que venceu na "
         f"gôndola — a alavanca está na compra e no cadastro, não na disciplina de loja."

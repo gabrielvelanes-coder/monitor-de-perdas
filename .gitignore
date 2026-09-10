@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 _smoke.log
+_run.log
 # dados brutos (grandes / sensíveis) — ficam só na máquina
 DADOS*.xlsx
 perdas*.xls

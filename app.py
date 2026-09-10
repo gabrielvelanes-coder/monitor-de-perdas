@@ -27,7 +27,6 @@ PASTA = Path(__file__).parent
 FAT_JSON = PASTA / "faturamento.json"
 
 BRL = lambda v: ("R$ " + f"{v:,.0f}").replace(",", ".") if pd.notna(v) else "—"
-BRLk = lambda v: ("R$ " + f"{v/1000:,.1f}k").replace(",", "X").replace(".", ",").replace("X", ".") if pd.notna(v) else "—"
 PCT = lambda v, d=2: f"{v*100:,.{d}f}%".replace(".", ",") if pd.notna(v) else "—"
 
 COR = {"ok": "#34D399", "atencao": "#FBBF24", "critico": "#F87171", "sem_dados": "#94A3B8"}
@@ -147,11 +146,14 @@ def _editor_faturamento(perdas, fat):
         [(l, meses[-1] if meses else "2026-01", 0.0) for l in lojas],
         columns=["loja", "ano_mes", "faturamento"])
     ed = st.data_editor(base, num_rows="dynamic", width="stretch", key="fat_ed")
+    st.caption("Só é usado quando **não há** `faturamento.csv` na pasta — o arquivo "
+               "tem prioridade sobre o que for digitado aqui.")
     if st.button("Salvar", icon=":material/save:"):
         c = ed.dropna(subset=["loja", "ano_mes", "faturamento"])
         c = c[c["faturamento"] > 0]
         FAT_JSON.write_text(c.to_json(orient="records"), encoding="utf-8")
-        st.toast("Faturamento salvo. Recarregue (R).", icon=":material/check:")
+        st.toast("Faturamento salvo.", icon=":material/check:")
+        st.rerun()
 
 
 CTX = build_context()
@@ -195,7 +197,7 @@ def tela_veredito():
 
     nivel, frase = ("sem_dados", "")
     if CTX["vclass"] is not None:
-        nivel, frase = core.frase_diagnostico(m, CTX["vclass"], esc, CTX["meta"])
+        nivel, frase = core.frase_diagnostico(m, CTX["vclass"], CTX["meta"])
     taxa = m["taxa"].mean()
     ult = m.iloc[-1]
     recuperavel = 0.0
@@ -249,17 +251,40 @@ def tela_veredito():
             st.markdown("**Bater com o número da reunião**")
             v = st.number_input("Valor apresentado (R$/mês)", value=0.0, step=1000.0)
             pp = st.number_input("ou % apresentado", value=0.0, step=0.1) / 100
-            if v:
-                st.write(f"Dados: **{BRL(m['perda'].mean())}/mês** · diferença "
-                         f"**{BRL(v - m['perda'].mean())}** ({(v/m['perda'].mean()-1)*100:+.0f}%)")
-            if pp:
+            pm = m["perda"].mean()
+            if v and pm:
+                st.write(f"Dados: **{BRL(pm)}/mês** · diferença "
+                         f"**{BRL(v - pm)}** ({(v/pm-1)*100:+.0f}%)")
+            elif v:
+                st.write(f"Dados: **{BRL(pm)}/mês** · diferença **{BRL(v - pm)}**")
+            if pp and taxa:
                 st.write(f"Dados: **{PCT(taxa)}** · diferença **{(pp-taxa)*100:+.2f} p.p.**")
 
     cob = CTX["cob"]
-    if cob["meses_sem_faturamento"] or cob["lojas_sem_faturamento"]:
+    meses_sf = cob["meses_sem_faturamento"]
+    if meses_sf:
+        p = CTX["perdas"]
+        if not CTX["incluir_dep"]:
+            p = p[~p["is_dep"]]
+        p = p[p["motivo_cat"].map(lambda c: core.in_escopo(c, esc))
+              & p["ano_mes"].isin(meses_sf)]
+        mm = p.groupby("ano_mes", as_index=False)["valor_total"].sum()
+        if not mm.empty:
+            with st.container(border=True):
+                st.markdown("**Meses sem faturamento informado** — perda em R$ "
+                            "(taxa % indisponível)")
+                st.caption("Complete o `faturamento.csv` (ou a barra lateral) com "
+                           + ", ".join(meses_sf) + " para ver a taxa desses meses.")
+                ch = alt.Chart(mm).mark_bar(color="#94A3B8").encode(
+                    x=alt.X("ano_mes:N", title=None),
+                    y=alt.Y("valor_total:Q", title="R$ perda"),
+                    tooltip=["ano_mes", alt.Tooltip("valor_total:Q", format=",.0f")])
+                st.altair_chart(ch, width="stretch")
+
+    if meses_sf or cob["lojas_sem_faturamento"]:
         avisos = []
-        if cob["meses_sem_faturamento"]:
-            avisos.append("meses sem faturamento: " + ", ".join(cob["meses_sem_faturamento"]))
+        if meses_sf:
+            avisos.append("meses sem faturamento: " + ", ".join(meses_sf))
         if cob["lojas_sem_faturamento"]:
             avisos.append("lojas sem faturamento: " +
                           ", ".join(str(int(x)) for x in cob["lojas_sem_faturamento"]))
