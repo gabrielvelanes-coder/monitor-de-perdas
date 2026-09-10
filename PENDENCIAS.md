@@ -65,6 +65,14 @@ Enquanto não conectar, dados do Power BI entram por print/export manual.
 
 ## FEITO NESTA SESSÃO (2026-09-10)
 
+### Commit `da48837` — Filtro de mês na tela em todas as telas
+Helper `_mes_local(df, key, container=)` espelhando `_loja_local` (some quando o
+recorte já tem ≤ 1 mês). **Evitável x estrutural** e **Regras e simulação**
+ganham mês + loja na tela (antes: só loja / nada); `n_meses` recalculado do
+recorte local. **Motivos** ganha "Meses (nesta tela)". **Painel** e **Anatomia**
+passam a usar o helper. Agora todas as 5 telas têm mês + loja na própria tela,
+além do filtro global da barra lateral.
+
 ### Commit `7fb754d` — Painel com filtro de mês/loja na tela
 Feedback do Gabriel: o Painel também precisa de filtro e informações no recorte.
 - Multiselect **"Meses (nesta tela)"** e **"Lojas (nesta tela)"** no topo do
