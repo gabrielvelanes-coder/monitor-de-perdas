@@ -1,0 +1,13 @@
+.cache/
+__pycache__/
+*.pyc
+_smoke.log
+# dados brutos (grandes / sensíveis) — ficam só na máquina
+DADOS*.xlsx
+perdas*.xls
+perdas*.xlsx
+*Baixa*Estoque*.xls*
+faturamento.csv
+faturamento.xlsx
+faturamento.json
+*.parquet
