@@ -110,6 +110,16 @@ def build_context() -> dict:
     elif FAT_JSON.exists():
         fat = pd.DataFrame(json.loads(FAT_JSON.read_text(encoding="utf-8")))
 
+    # filtros globais — saem de dentro das telas e valem para todas
+    st.sidebar.markdown("### Filtros")
+    lojas_all = sorted(int(x) for x in
+                       perdas.loc[~perdas["is_dep"], "loja"].dropna().unique())
+    meses_all = sorted(perdas["ano_mes"].unique())
+    lojas_sel = st.sidebar.multiselect("Lojas", lojas_all, default=[],
+                                       placeholder="todas as lojas", key="g_lojas")
+    meses_sel = st.sidebar.multiselect("Período (meses)", meses_all, default=[],
+                                       placeholder="todo o período", key="g_meses")
+
     # parâmetros
     st.sidebar.markdown("### Parâmetros")
     escopo = st.sidebar.segmented_control(
@@ -122,21 +132,35 @@ def build_context() -> dict:
     with st.sidebar.expander("Digitar faturamento", icon=":material/edit:"):
         _editor_faturamento(perdas, fat)
 
-    # derivados
-    taxa_lm = core.taxa_por_loja_mes(perdas, fat, escopo, incluir_dep)
+    # aplica o recorte global no que as telas consomem
+    perdas_f, fat_f = perdas, fat
+    if lojas_sel:
+        perdas_f = perdas_f[perdas_f["loja"].isin(lojas_sel)]
+        fat_f = fat_f[fat_f["loja"].isin(lojas_sel)] if not fat_f.empty else fat_f
+    if meses_sel:
+        perdas_f = perdas_f[perdas_f["ano_mes"].isin(meses_sel)]
+        fat_f = fat_f[fat_f["ano_mes"].isin(meses_sel)] if not fat_f.empty else fat_f
+
+    # derivados (já no recorte global)
+    taxa_lm = core.taxa_por_loja_mes(perdas_f, fat_f, escopo, incluir_dep)
     mensal = core.resumo_mensal(taxa_lm)
-    cob = core.cobertura_faturamento(perdas, fat)
-    n_meses_perda = perdas["ano_mes"].nunique()
+    cob = core.cobertura_faturamento(perdas_f, fat_f)
+    n_meses_perda = max(perdas_f["ano_mes"].nunique(), 1)
 
     vclass = None
     if cad is not None:
-        psig = (fonte, len(perdas))
+        psig = (fonte, len(perdas))              # cache na base cheia; filtra depois
         csig = (len(cad), int(cad["produto"].nunique()))
         vclass = _vclass(psig, csig, perdas, cad)
+        if lojas_sel:
+            vclass = vclass[vclass["loja"].isin(lojas_sel)]
+        if meses_sel:
+            vclass = vclass[vclass["ano_mes"].isin(meses_sel)]
 
-    return dict(perdas=perdas, cad=cad, fat=fat, fonte=fonte, escopo=escopo,
-                meta=meta, incluir_dep=incluir_dep, taxa_lm=taxa_lm, mensal=mensal,
-                cob=cob, vclass=vclass, n_meses=n_meses_perda)
+    return dict(perdas=perdas_f, perdas_full=perdas, cad=cad, fat=fat_f, fonte=fonte,
+                escopo=escopo, meta=meta, incluir_dep=incluir_dep, taxa_lm=taxa_lm,
+                mensal=mensal, cob=cob, vclass=vclass, n_meses=n_meses_perda,
+                lojas_sel=lojas_sel, meses_sel=meses_sel)
 
 
 def _editor_faturamento(perdas, fat):
@@ -180,13 +204,22 @@ def _falta_cadastro():
     return False
 
 
+def _recorte_txt() -> str:
+    """Descrição do filtro global ativo, para o cabeçalho de cada tela."""
+    ls, ms = CTX["lojas_sel"], CTX["meses_sel"]
+    a = "todas as lojas" if not ls else "lojas " + ", ".join(str(x) for x in ls)
+    b = "todo o período" if not ms else ", ".join(ms)
+    return f"{a} · {b}"
+
+
 # =========================================================================== #
 # TELA 1 — VEREDITO
 # =========================================================================== #
 def tela_veredito():
     st.title("A perda é aceitável?")
     m, esc = CTX["mensal"], CTX["escopo"]
-    st.caption(f"Escopo: {core.ESCOPOS[esc]} · fonte `{CTX['fonte']}`")
+    st.caption(f"Escopo: {core.ESCOPOS[esc]} · recorte: {_recorte_txt()} · "
+               f"fonte `{CTX['fonte']}`")
 
     if m.empty:
         _sem_faturamento_aviso()
@@ -311,27 +344,15 @@ def tela_motivos():
     p["classe"] = p["motivo_cat"].map(core.classe_motivo)
 
     fat = CTX["fat"]
-    c_mes, c_loja = st.columns(2)
+    st.caption("Recorte (filtro global): " + _recorte_txt())
+    if p.empty:
+        st.info("Sem lançamentos nesse recorte.", icon=":material/info:")
+        return
 
-    lojas = sorted(int(x) for x in p["loja"].dropna().unique())
-    sel_l = c_loja.multiselect("Lojas", lojas, default=[],
-                               placeholder="todas as lojas", key="mot_lojas")
-    if sel_l:
-        p = p[p["loja"].isin(sel_l)]
-        fat = fat[fat["loja"].isin(sel_l)] if not fat.empty else fat
-
-    meses_all = sorted(p["ano_mes"].unique())
-    meses_com_fat = (sorted(set(fat["ano_mes"].unique()) & set(meses_all))
+    sel = sorted(p["ano_mes"].unique())            # meses já vêm do filtro global
+    meses_com_fat = (sorted(set(fat["ano_mes"].unique()) & set(sel))
                      if not fat.empty else [])
-    default_meses = meses_com_fat or meses_all
-    sel = c_mes.multiselect("Meses", meses_all, default=default_meses,
-                            placeholder="todos os meses", key="mot_meses")
-    if not sel:
-        sel = meses_all
-    p = p[p["ano_mes"].isin(sel)]
-    n_meses = len(sel)
-    if sel_l:
-        st.caption("Recorte: loja " + ", ".join(str(x) for x in sel_l))
+    n_meses = max(len(sel), 1)
 
     meses_sel_com_fat = [m for m in sel if m in meses_com_fat]
     meses_sel_sem_fat = [m for m in sel if m not in meses_com_fat]
@@ -434,22 +455,7 @@ def tela_anatomia():
     if _falta_cadastro():
         return
     vc = CTX["vclass"].copy()
-
-    c_mes, c_loja = st.columns(2)
-    meses = sorted(vc["ano_mes"].unique())
-    sel = c_mes.multiselect("Meses", meses, default=meses,
-                            placeholder="todos os meses", key="anat_meses")
-    if sel:
-        vc = vc[vc["ano_mes"].isin(sel)]
-    lojas = sorted(int(x) for x in vc["loja"].dropna().unique())
-    sel_l = c_loja.multiselect("Lojas", lojas, default=[],
-                               placeholder="todas as lojas", key="anat_lojas")
-    if sel_l:
-        vc = vc[vc["loja"].isin(sel_l)]
-    escopo_txt = ("todas as lojas" if not sel_l
-                  else "loja " + ", ".join(str(x) for x in sel_l))
-    st.caption(f"Recorte: {escopo_txt} · "
-               + (", ".join(sel) if sel and len(sel) < len(meses) else "todos os meses"))
+    st.caption("Recorte (filtro global): " + _recorte_txt())
 
     if vc.empty:
         st.info("Sem vencidos nesse recorte.", icon=":material/info:")
@@ -605,8 +611,12 @@ def tela_baldes():
     st.title("Estou dando perda em item que vende?")
     if _falta_cadastro():
         return
+    st.caption("Recorte (filtro global): " + _recorte_txt())
     vc = CTX["vclass"]
     nm = CTX["n_meses"]
+    if vc.empty:
+        st.info("Sem vencidos nesse recorte.", icon=":material/info:")
+        return
     rb = core.resumo_baldes(vc, nm)
     tot_mes = rb["valor_mes"].sum()
 
@@ -670,8 +680,12 @@ def tela_regras():
     st.title("O que mudar — e quanto economiza")
     if _falta_cadastro():
         return
+    st.caption("Recorte (filtro global): " + _recorte_txt())
     vc = CTX["vclass"]
     nm = CTX["n_meses"]
+    if vc.empty:
+        st.info("Sem vencidos nesse recorte.", icon=":material/info:")
+        return
 
     st.markdown(
         "A perda é **cauda longa** (milhares de SKUs, cada um pouco), então não adianta "
