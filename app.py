@@ -224,6 +224,18 @@ def _recorte_txt() -> str:
     return f"{a} · {b}"
 
 
+def _loja_local(df: pd.DataFrame, key: str) -> list[int]:
+    """Multiselect de Lojas dentro da tela, restringindo o recorte global.
+    Não aparece quando o recorte já tem 0 ou 1 loja."""
+    lojas = sorted(int(x) for x in df["loja"].dropna().unique())
+    if len(lojas) <= 1:
+        return []
+    return st.multiselect(
+        "Lojas (nesta tela)", lojas, default=[], key=key,
+        placeholder="todas as lojas do recorte",
+        help="Restringe ainda mais dentro do filtro global da barra lateral.")
+
+
 # =========================================================================== #
 # TELA 1 — PAINEL (resumo executivo — respeita o filtro global)
 # =========================================================================== #
@@ -432,6 +444,14 @@ def tela_motivos():
         st.info("Sem lançamentos nesse recorte.", icon=":material/info:")
         return
 
+    lsel = _loja_local(p, "mot_lojas")
+    if lsel:
+        p = p[p["loja"].isin(lsel)]
+        fat = fat[fat["loja"].isin(lsel)] if not fat.empty else fat
+        if p.empty:
+            st.info("Sem lançamentos nessas lojas.", icon=":material/info:")
+            return
+
     sel = sorted(p["ano_mes"].unique())            # meses já vêm do filtro global
     meses_com_fat = (sorted(set(fat["ano_mes"].unique()) & set(sel))
                      if not fat.empty else [])
@@ -539,6 +559,10 @@ def tela_anatomia():
         return
     vc = CTX["vclass"].copy()
     st.caption("Recorte (filtro global): " + _recorte_txt())
+
+    lsel = _loja_local(vc, "anat_lojas")
+    if lsel:
+        vc = vc[vc["loja"].isin(lsel)]
 
     if vc.empty:
         st.info("Sem vencidos nesse recorte.", icon=":material/info:")
@@ -697,6 +721,9 @@ def tela_baldes():
     st.caption("Recorte (filtro global): " + _recorte_txt())
     vc = CTX["vclass"]
     nm = CTX["n_meses"]
+    lsel = _loja_local(vc, "bald_lojas")
+    if lsel:
+        vc = vc[vc["loja"].isin(lsel)]
     if vc.empty:
         st.info("Sem vencidos nesse recorte.", icon=":material/info:")
         return
