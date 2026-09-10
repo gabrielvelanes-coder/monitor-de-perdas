@@ -271,16 +271,10 @@ def _mes_local(df: pd.DataFrame, key: str, container=None) -> list[str]:
         help="Vazio = todos os meses do filtro global.")
 
 
-# motivos que a Anatomia pode enxergar (além do vencido, que é o default do CTX)
-MOTIVO_OPCOES = {
-    "Vencido": ("vencido",),
-    "Danificado": ("danificado",),
-    "Furto ou roubo": ("furto",),
-    "Descontinuado": ("descontinuado",),
-    "Perda real (venc.+danif.+furto+descont.+outros)":
-        tuple(k for k in core.CATS if k != "ignorar" and core.IS_PERDA_REAL.get(k, True)),
-    "Todos os motivos": tuple(k for k in core.CATS if k != "ignorar"),
-}
+def _cats_do_escopo(esc_key: str) -> tuple:
+    """Motivos de um escopo (vencido / perda_real / todos), ordenados p/ o cache."""
+    return tuple(sorted(k for k in core.CATS
+                        if k != "ignorar" and core.in_escopo(k, esc_key)))
 
 
 def _vclass_recorte(cats):
@@ -665,15 +659,25 @@ def tela_anatomia():
     st.caption("Recorte (filtro global): " + _recorte_txt())
 
     # ---- motivo + filtros da tela (mês e loja, dentro do recorte global) --- #
-    c_mot, c_mes, c_loja = st.columns([2, 1, 1])
-    mot_label = c_mot.selectbox(
-        "Motivo da baixa", list(MOTIVO_OPCOES), key="anat_motivo",
-        help="A Anatomia olha vencidos por padrão. Troque para ver a mesma "
-             "anatomia (medicamento / curva / giro) de outro motivo de baixa.")
-    cats = MOTIVO_OPCOES[mot_label]
+    c_esc, c_mot, c_mes, c_loja = st.columns([1.1, 1.7, 1, 1])
+    esc_a = c_esc.segmented_control(
+        "Motivos", ["Vencido", "Perda real", "Todos"], default="Vencido",
+        key="anat_escopo") or "Vencido"
+    esc_key = {"Vencido": "vencido", "Perda real": "perda_real", "Todos": "todos"}[esc_a]
+    labels_all = [core.LABEL[k] for k in core.CATS if k != "ignorar"]
+    mot_extra = c_mot.multiselect(
+        "…ou motivos específicos", labels_all, default=[], key="anat_motivos",
+        placeholder="usa o escopo à esquerda",
+        help="Vazio = usa o escopo. Preenchido, sobrepõe: só os motivos marcados.")
+    if mot_extra:
+        inv = {v: k for k, v in core.LABEL.items()}
+        cats = tuple(sorted(inv[x] for x in mot_extra))
+        mot_curto = mot_extra[0] if len(mot_extra) == 1 else f"{len(mot_extra)} motivos"
+    else:
+        cats = _cats_do_escopo(esc_key)
+        mot_curto = esc_a
     vc = (CTX["vclass"] if cats == ("vencido",) else _vclass_recorte(cats)).copy()
-    mot_curto = mot_label.split(" (")[0]
-    unidade = "do total" if cats != ("vencido",) else "do vencido"
+    unidade = "do vencido" if cats == ("vencido",) else "do total"
 
     msel = _mes_local(vc, "anat_meses", c_mes)
     if msel:
@@ -684,19 +688,29 @@ def tela_anatomia():
 
     # filtro por status no catálogo (só quando o catálogo está carregado)
     tem_cat = CTX["catalogo"] is not None and "status_cadastro" in vc.columns
+    stat = "Todos"
+    vc_pre_status = vc
     if tem_cat:
         _s = vc["status_cadastro"].astype(str).str.strip().str.lower()
         fora_cat = vc["status_cadastro"].isna() | _s.isin(["", "nan", "none"])
         stat = st.radio("Status no catálogo",
                         ["Todos", "Ativos", "Inativos", "Fora do catálogo"],
                         horizontal=True, key="anat_status",
-                        help="Status do produto na BASE CADASTRO COM GRUPOS.")
+                        help="Status do produto na BASE CADASTRO COM GRUPOS. "
+                             "≠ 'Todos' esconde itens — inclusive os que não casaram "
+                             "com o catálogo.")
         if stat == "Ativos":
             vc = vc[_s.eq("ativo")]
         elif stat == "Inativos":
             vc = vc[_s.eq("inativo")]
         elif stat == "Fora do catálogo":
             vc = vc[fora_cat]
+    oculto_status = vc_pre_status["valor_total"].sum() - vc["valor_total"].sum()
+    if stat != "Todos" and oculto_status > 0.5:
+        st.warning(
+            f"**Status no catálogo = {stat}** escondeu {BRL(oculto_status)} "
+            f"({len(vc_pre_status) - len(vc)} linhas). Volte para **Todos** para ver "
+            "o recorte inteiro.", icon=":material/visibility_off:")
 
     if vc.empty:
         st.info(f"Sem baixas de \"{mot_curto}\" nesse recorte.", icon=":material/info:")
@@ -725,6 +739,34 @@ def tela_anatomia():
                    "`classif` no cadastro (não caem em medicamento nem não-medicamento). "
                    "Escolha \"Só sem classificação\" no seletor **Ver** para listá-los "
                    "na tabela do fim da página.")
+
+    # ---- por motivo no recorte (informação) ------------------------------ #
+    gmot = (vc.groupby("motivo_label", as_index=False)
+            .agg(valor=("valor_total", "sum"), unid=("itens", "sum"),
+                 linhas=("valor_total", "size"), produtos=("produto", "nunique")))
+    gmot["pct"] = gmot["valor"] / tot
+    gmot = gmot.sort_values("valor", ascending=False).reset_index(drop=True)
+    with st.expander(f":material/category: Motivos no recorte ({len(gmot)}) — "
+                     f"{BRL(tot_real)} no total", expanded=len(gmot) > 1):
+        st.dataframe(
+            gmot, hide_index=True, width="stretch",
+            column_config={
+                "motivo_label": "Motivo",
+                "valor": st.column_config.NumberColumn("R$", format="R$ %.0f"),
+                "unid": st.column_config.NumberColumn("Unidades", format="%.0f"),
+                "linhas": "Linhas", "produtos": "Produtos",
+                "pct": st.column_config.NumberColumn("% do total", format="percent")})
+        if len(gmot) > 1:
+            ch_m = alt.Chart(gmot).mark_bar(color="#60A5FA").encode(
+                x=alt.X("valor:Q", title="R$"),
+                y=alt.Y("motivo_label:N", sort="-x", title=None),
+                tooltip=["motivo_label", alt.Tooltip("valor:Q", format=",.0f"),
+                         alt.Tooltip("unid:Q", format=",.0f")])
+            lbl_m = alt.Chart(gmot).mark_text(align="left", dx=4, color="#CBD5E1",
+                                              fontSize=11).encode(
+                x="valor:Q", y=alt.Y("motivo_label:N", sort="-x"),
+                text=alt.Text("valor:Q", format=",.0f"))
+            st.altair_chart(ch_m + lbl_m, width="stretch")
 
     if "anat_nonce" not in st.session_state:
         st.session_state["anat_nonce"] = 0
@@ -833,14 +875,16 @@ def tela_anatomia():
         if filtros:
             st.markdown("**Produtos — " +
                         " · ".join(f"{k}: {v}" for k, v in filtros) + "**")
-            st.caption(f"{len(d)} linhas de {mot_curto.lower()} · "
-                       f"{BRL(d['valor_total'].sum())} · "
-                       f"{d['itens'].sum():,.0f} unidades no recorte filtrado."
+            oculto_g = vc["valor_total"].sum() - d["valor_total"].sum()
+            st.caption(f"{len(d)} linhas · {BRL(d['valor_total'].sum())} · "
+                       f"{d['itens'].sum():,.0f} unidades no filtro dos gráficos. "
+                       f"({BRL(oculto_g)} em {len(vc) - len(d)} linhas fora do filtro.)"
                        .replace(",", "."))
         else:
-            st.markdown(f"**Produtos** — todos os itens de \"{mot_curto}\" no recorte")
-            st.caption("Clique numa barra dos gráficos acima para filtrar aqui. "
-                       "Clique nos cabeçalhos da tabela para ordenar.")
+            st.markdown(f"**Produtos** — todos os itens de \"{mot_curto}\" no recorte "
+                        f"· {BRL(vc['valor_total'].sum())} · {len(vc)} linhas")
+            st.caption("Uma linha por produto **e motivo**. Clique numa barra dos "
+                       "gráficos acima para filtrar; clique nos cabeçalhos para ordenar.")
         agg = dict(valor=("valor_total", "sum"), itens=("itens", "sum"),
                    curva_valor=("curva_valor", "first"), curva_qtd=("curva_qtd", "first"),
                    macro=("macro", "first"), cat=("cat1", "first"),
@@ -851,11 +895,13 @@ def tela_anatomia():
                        str(int(x)) for x in sorted(s.dropna().unique()))))
         if tem_cat:
             agg["status_cadastro"] = ("status_cadastro", "first")
-        tab = (d.groupby("produto", as_index=False).agg(**agg)
-               .sort_values("valor", ascending=False).head(300))
+        tab_full = (d.groupby(["produto", "motivo_label"], as_index=False).agg(**agg)
+                    .sort_values("valor", ascending=False).reset_index(drop=True))
+        tab = tab_full.head(500)
         st.dataframe(tab, hide_index=True, width="stretch", height=360,
                      column_config={
                          "produto": "Produto",
+                         "motivo_label": "Motivo",
                          "valor": st.column_config.NumberColumn("Total perda (R$)",
                                                                 format="R$ %.0f"),
                          "itens": st.column_config.NumberColumn("Unidades", format="%.0f"),
@@ -866,12 +912,13 @@ def tela_anatomia():
                          "n_lojas": "Nº lojas",
                          "lojas_ids": "Lojas (ID)",
                          "status_cadastro": "Status catálogo"})
-        st.caption("As lojas são identificadas por número (2–25); não há nome de loja "
-                   "no relatório de perdas. **Lojas (ID)** lista as lojas que "
-                   f"baixaram o item por \"{mot_curto.lower()}\"; **Unidades** é a "
-                   "quantidade total.")
+        if len(tab_full) > 500:
+            st.caption(f"Mostrando as 500 maiores de {len(tab_full)} linhas — "
+                       "o CSV traz todas.")
+        st.caption("As lojas são número (2–25); não há nome de loja no relatório. "
+                   "**Lojas (ID)** = lojas que baixaram o item por aquele motivo.")
         slug = re.sub(r"[^a-z0-9]+", "_", mot_curto.lower()).strip("_")
-        st.download_button("Baixar (CSV)", tab.to_csv(index=False).encode("utf-8-sig"),
+        st.download_button("Baixar (CSV)", tab_full.to_csv(index=False).encode("utf-8-sig"),
                            f"anatomia_{slug}.csv", "text/csv",
                            icon=":material/download:", key="anat_dl")
 
