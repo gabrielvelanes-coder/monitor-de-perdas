@@ -2,11 +2,12 @@
 Monitor de Perdas — Grupo Velanes
 streamlit run app.py
 
-Quatro telas, cada uma responde uma pergunta:
+Cinco telas, cada uma responde uma pergunta:
   1. Veredito .............. a perda é aceitável?
-  2. Anatomia da perda .... o que são esses itens? (medicamento? curva? giro?)
-  3. Evitável x estrutural  estou dando perda em item que vende?
-  4. Regras e simulação ... o que mudar e quanto economiza
+  2. Motivos ............... o que é perda de verdade e o que não é? (de-para c/ o BI)
+  3. Anatomia da perda .... o que são esses itens? (medicamento? curva? giro?)
+  4. Evitável x estrutural  estou dando perda em item que vende?
+  5. Regras e simulação ... o que mudar e quanto economiza
 """
 from __future__ import annotations
 
@@ -292,7 +293,117 @@ def tela_veredito():
 
 
 # =========================================================================== #
-# TELA 2 — ANATOMIA DA PERDA
+# TELA 2 — MOTIVOS (de-para: o que é perda de verdade e o que não é)
+# =========================================================================== #
+CLASSE_COR = {"Vencido": "#F87171", "Outra perda real": "#FB923C", "Não é perda": "#94A3B8"}
+
+
+def tela_motivos():
+    st.title("O que é o quê?")
+    st.caption("Cada motivo de baixa de estoque: quanto pesa em R$ e em % do faturamento, "
+               "e se é perda de verdade. É o de-para que explica a diferença entre a taxa "
+               "da ferramenta (só vencidos) e o %perda/fat do Power BI (todos os motivos).")
+
+    p = CTX["perdas"]
+    if not CTX["incluir_dep"]:
+        p = p[~p["is_dep"]]
+    p = p[p["motivo_cat"] != "ignorar"].copy()
+    p["classe"] = p["motivo_cat"].map(core.classe_motivo)
+
+    fat = CTX["fat"]
+    meses_all = sorted(p["ano_mes"].unique())
+    meses_com_fat = (sorted(set(fat["ano_mes"].unique()) & set(meses_all))
+                     if not fat.empty else [])
+    default_meses = meses_com_fat or meses_all
+    sel = st.multiselect("Meses", meses_all, default=default_meses,
+                         placeholder="todos os meses")
+    if not sel:
+        sel = meses_all
+    p = p[p["ano_mes"].isin(sel)]
+    n_meses = len(sel)
+
+    meses_sel_com_fat = [m for m in sel if m in meses_com_fat]
+    meses_sel_sem_fat = [m for m in sel if m not in meses_com_fat]
+    fat_com = (fat.loc[fat["ano_mes"].isin(meses_sel_com_fat), "faturamento"].sum()
+               if meses_sel_com_fat else 0.0)
+    p_fat = p[p["ano_mes"].isin(meses_sel_com_fat)]
+
+    def _pct_fat(valor_nos_meses_com_fat):
+        return valor_nos_meses_com_fat / fat_com if fat_com else float("nan")
+
+    # ---- 3 cartões: bridge de escopo ------------------------------------- #
+    st.markdown("**Bridge de escopo** — mesmo relatório, três recortes")
+    escs = [("vencido", "Somente vencidos"),
+            ("perda_real", "Perda real"),
+            ("todos", "Todos os motivos")]
+    with st.container(horizontal=True):
+        for key, rot in escs:
+            mask = p["motivo_cat"].map(lambda c: core.in_escopo(c, key))
+            valor_mes = p.loc[mask, "valor_total"].sum() / n_meses
+            mask_f = p_fat["motivo_cat"].map(lambda c: core.in_escopo(c, key))
+            pct = _pct_fat(p_fat.loc[mask_f, "valor_total"].sum())
+            st.metric(rot, BRL(valor_mes) + " /mês",
+                      delta=PCT(pct) + " do faturamento", delta_color="off", border=True)
+
+    if meses_sel_sem_fat:
+        st.caption(f":material/info: {', '.join(meses_sel_sem_fat)} sem faturamento "
+                   "informado — entra no R$/mês, mas fica fora do cálculo de %.")
+
+    # ---- tabela por motivo --------------------------------------------- #
+    g = (p.groupby(["motivo_cat", "motivo_label", "classe"], as_index=False)
+         .agg(valor=("valor_total", "sum"), linhas=("valor_total", "size")))
+    g["valor_mes"] = g["valor"] / n_meses
+    total_lancado = g["valor"].sum() or 1.0
+    g["pct_lancado"] = g["valor"] / total_lancado
+    vfat = p_fat.groupby("motivo_cat")["valor_total"].sum()
+    g["pct_fat"] = g["motivo_cat"].map(lambda c: _pct_fat(vfat.get(c, 0.0)))
+    g = g.sort_values("valor", ascending=False).reset_index(drop=True)
+
+    with st.container(border=True):
+        st.markdown("**Por motivo** (período: " + ", ".join(sel) + ")")
+        st.dataframe(
+            g[["motivo_label", "classe", "valor", "valor_mes", "pct_fat",
+               "pct_lancado", "linhas"]],
+            hide_index=True, width="stretch",
+            column_config={
+                "motivo_label": "Motivo",
+                "classe": "Classe",
+                "valor": st.column_config.NumberColumn("R$ no período", format="R$ %.0f"),
+                "valor_mes": st.column_config.NumberColumn("R$/mês", format="R$ %.0f"),
+                "pct_fat": st.column_config.NumberColumn("% do faturamento", format="percent"),
+                "pct_lancado": st.column_config.NumberColumn("% do lançado", format="percent"),
+                "linhas": "Linhas"})
+
+    left, right = st.columns(2)
+    with left:
+        with st.container(border=True):
+            st.markdown("**Peso de cada motivo** (R$ no período, cor = classe)")
+            ch = alt.Chart(g).mark_bar().encode(
+                x=alt.X("valor:Q", title="R$ no período"),
+                y=alt.Y("motivo_label:N", sort="-x", title=None),
+                color=alt.Color("classe:N", scale=alt.Scale(
+                    domain=list(CLASSE_COR), range=list(CLASSE_COR.values())),
+                    legend=alt.Legend(orient="bottom", title=None)),
+                tooltip=["motivo_label", "classe",
+                         alt.Tooltip("valor:Q", format=",.0f")])
+            st.altair_chart(ch, width="stretch")
+    with right:
+        with st.container(border=True):
+            st.markdown("**Por mês, empilhado por classe**")
+            gm = p.groupby(["ano_mes", "classe"], as_index=False)["valor_total"].sum()
+            ch2 = alt.Chart(gm).mark_bar().encode(
+                x=alt.X("ano_mes:N", title=None),
+                y=alt.Y("valor_total:Q", title="R$"),
+                color=alt.Color("classe:N", scale=alt.Scale(
+                    domain=list(CLASSE_COR), range=list(CLASSE_COR.values())),
+                    legend=alt.Legend(orient="bottom", title=None)),
+                tooltip=["ano_mes", "classe",
+                         alt.Tooltip("valor_total:Q", format=",.0f")])
+            st.altair_chart(ch2, width="stretch")
+
+
+# =========================================================================== #
+# TELA 3 — ANATOMIA DA PERDA
 # =========================================================================== #
 def tela_anatomia():
     st.title("O que são esses itens?")
@@ -379,7 +490,7 @@ def tela_anatomia():
 
 
 # =========================================================================== #
-# TELA 3 — EVITÁVEL x ESTRUTURAL
+# TELA 4 — EVITÁVEL x ESTRUTURAL
 # =========================================================================== #
 def tela_baldes():
     st.title("Estou dando perda em item que vende?")
@@ -444,7 +555,7 @@ def tela_baldes():
 
 
 # =========================================================================== #
-# TELA 4 — REGRAS E SIMULAÇÃO
+# TELA 5 — REGRAS E SIMULAÇÃO
 # =========================================================================== #
 def tela_regras():
     st.title("O que mudar — e quanto economiza")
@@ -518,6 +629,7 @@ def tela_regras():
 # --------------------------------------------------------------------------- #
 nav = st.navigation([
     st.Page(tela_veredito, title="Veredito", icon=":material/speed:", default=True),
+    st.Page(tela_motivos, title="Motivos", icon=":material/category:"),
     st.Page(tela_anatomia, title="Anatomia da perda", icon=":material/account_tree:"),
     st.Page(tela_baldes, title="Evitável x estrutural", icon=":material/rule:"),
     st.Page(tela_regras, title="Regras e simulação", icon=":material/tune:"),

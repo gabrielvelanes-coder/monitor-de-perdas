@@ -100,6 +100,32 @@ def in_escopo(cat: str, escopo: str) -> bool:
     return cat == "vencido"
 
 
+# categoria de motivo -> classe (3 baldes, usados na tela "Motivos")
+CLASSES_PERDA = ["Vencido", "Outra perda real", "Não é perda"]
+
+_CLASSE_MOTIVO = {
+    "vencido":              "Vencido",
+    "danificado":           "Outra perda real",
+    "furto":                "Outra perda real",
+    "descontinuado":        "Outra perda real",
+    "outros":               "Outra perda real",
+    "consumo_loja":         "Não é perda",
+    "marketing":            "Não é perda",
+    "reembolso_fornecedor": "Não é perda",
+    "devolucao_fornecedor": "Não é perda",
+    "bonificado":           "Não é perda",
+    "doacao":               "Não é perda",
+    "treinamento":          "Não é perda",
+    "ignorar":              "Não é perda",
+}
+
+
+def classe_motivo(motivo_cat: str) -> str:
+    """Balde de 3 níveis p/ a tela Motivos: Vencido / Outra perda real / Não é perda.
+    Coerente com IS_PERDA_REAL (só separa o vencido do resto da perda real)."""
+    return _CLASSE_MOTIVO.get(motivo_cat, "Outra perda real")
+
+
 # ----------------------------------------------------------------------------- #
 # 2. carga do relatório de perdas
 # ----------------------------------------------------------------------------- #
