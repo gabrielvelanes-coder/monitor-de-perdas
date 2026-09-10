@@ -32,6 +32,18 @@ PCT = lambda v, d=2: f"{v*100:,.{d}f}%".replace(".", ",") if pd.notna(v) else "�
 
 COR = {"ok": "#34D399", "atencao": "#FBBF24", "critico": "#F87171", "sem_dados": "#94A3B8"}
 COR_BALDE = {"pdv": "#34D399", "compra": "#FB923C", "cadastro": "#F87171", "sem_cadastro": "#94A3B8"}
+CLASSE_COR = {"Vencido": "#F87171", "Outra perda real": "#FB923C", "Não é perda": "#94A3B8"}
+
+
+def _cor_taxa(taxa: float, meta: float) -> str:
+    """Semáforo de uma taxa contra a meta (mesma régua de frase_diagnostico)."""
+    if pd.isna(taxa):
+        return "sem_dados"
+    if taxa <= meta * 1.05:
+        return "ok"
+    if taxa <= meta * 1.3:
+        return "atencao"
+    return "critico"
 
 
 # --------------------------------------------------------------------------- #
@@ -213,11 +225,11 @@ def _recorte_txt() -> str:
 
 
 # =========================================================================== #
-# TELA 1 — VEREDITO
+# TELA 1 — PAINEL (resumo executivo — respeita o filtro global)
 # =========================================================================== #
 def tela_veredito():
-    st.title("A perda é aceitável?")
-    m, esc = CTX["mensal"], CTX["escopo"]
+    st.title("Painel")
+    m, esc, meta = CTX["mensal"], CTX["escopo"], CTX["meta"]
     st.caption(f"Escopo: {core.ESCOPOS[esc]} · recorte: {_recorte_txt()} · "
                f"fonte `{CTX['fonte']}`")
 
@@ -229,51 +241,65 @@ def tela_veredito():
         st.bar_chart(mm, x="ano_mes", y="valor_total", height=260)
         return
 
+    fat_tot = m["faturamento"].sum()
+    perda_tot = m["perda"].sum()
+    taxa_pond = perda_tot / fat_tot if fat_tot else float("nan")
+    taxa_media = m["taxa"].mean()
+    gap_pp = (taxa_pond - meta) * 100
+    n = len(m)
+    periodo_txt = (f"{m['ano_mes'].iloc[0]}…{m['ano_mes'].iloc[-1]}" if n > 1
+                   else m["ano_mes"].iloc[0])
+
     nivel, frase = ("sem_dados", "")
-    if CTX["vclass"] is not None:
-        nivel, frase = core.frase_diagnostico(m, CTX["vclass"], CTX["meta"])
-    taxa = m["taxa"].mean()
-    ult = m.iloc[-1]
     recuperavel = 0.0
     if CTX["vclass"] is not None:
+        nivel, frase = core.frase_diagnostico(m, CTX["vclass"], meta)
         rb = core.resumo_baldes(CTX["vclass"], CTX["n_meses"])
         recuperavel = rb.loc[rb["balde"].isin(["compra", "cadastro"]), "valor_mes"].sum()
+    nivel_show = nivel if nivel != "sem_dados" else _cor_taxa(taxa_pond, meta)
 
+    # ---- KPIs do topo -------------------------------------------------- #
+    with st.container(horizontal=True):
+        st.metric(f"Faturamento ({n} {'mês' if n == 1 else 'meses'})", BRL(fat_tot),
+                  border=True, help=f"Meses com faturamento no recorte: {periodo_txt}.")
+        st.metric("Perda no período", BRL(perda_tot), border=True,
+                  help=f"Motivos no escopo '{core.ESCOPOS[esc].split(' (')[0]}'.")
+        st.metric("Taxa de perdas", PCT(taxa_pond), border=True,
+                  help="Ponderada: perda total ÷ faturamento total do recorte.")
+        st.metric("Gap vs meta", f"{gap_pp:+.2f} p.p.".replace(".", ","),
+                  delta=f"meta {PCT(meta)}", delta_color="off", border=True)
+
+    # ---- diagnóstico (semáforo + frase) ------------------------------- #
     with st.container(border=True):
         c1, c2 = st.columns([1, 2], vertical_alignment="center")
         with c1:
             rot = {"ok": "ACEITÁVEL", "atencao": "ATENÇÃO", "critico": "CRÍTICO",
-                   "sem_dados": "—"}[nivel]
+                   "sem_dados": "—"}[nivel_show]
+            cor = COR[nivel_show]
             st.markdown(
                 f"<div style='font-size:0.8rem;color:#94A3B8;text-transform:uppercase;"
-                f"letter-spacing:.08em'>Taxa média do período</div>"
-                f"<div style='font-size:3rem;font-weight:700;line-height:1.1'>{PCT(taxa)}</div>"
+                f"letter-spacing:.08em'>Taxa média mensal</div>"
+                f"<div style='font-size:3rem;font-weight:700;line-height:1.1'>{PCT(taxa_media)}</div>"
                 f"<div style='display:inline-block;margin-top:.4rem;padding:.15rem .6rem;"
-                f"border-radius:999px;background:{COR[nivel]}22;color:{COR[nivel]};"
+                f"border-radius:999px;background:{cor}22;color:{cor};"
                 f"font-weight:600;font-size:.85rem'>{rot}</div>",
                 unsafe_allow_html=True)
         with c2:
             st.markdown(f"**Diagnóstico.** {frase}" if frase else
                         "Envie o cadastro (DADOS) para o diagnóstico automático.")
+            if recuperavel:
+                st.caption(f":material/savings: Recuperável ~{BRL(recuperavel)}/mês nos "
+                           "baldes 'excesso de compra' + 'item suspenso' — alavanca de "
+                           "compra e cadastro, não de disciplina de loja.")
 
-    with st.container(horizontal=True):
-        st.metric("Taxa no mês", PCT(ult["taxa"]),
-                  delta=PCT(ult["taxa"] - m.iloc[-2]["taxa"]) if len(m) > 1 else None,
-                  delta_color="inverse", border=True,
-                  chart_data=(m["taxa"] * 100).tolist(), chart_type="line")
-        st.metric("Perda no mês", BRL(ult["perda"]), border=True)
-        st.metric("Faturamento no mês", BRL(ult["faturamento"]), border=True)
-        st.metric("Recuperável / mês", BRL(recuperavel), border=True,
-                  help="Valor médio nos baldes 'excesso de compra' e 'item suspenso' — "
-                       "atacável por política de compra e cadastro, não por disciplina de loja.")
-
-    left, right = st.columns([3, 2])
+    # ---- evolução mensal + ranking de lojas -------------------------- #
+    left, right = st.columns(2)
     with left:
         with st.container(border=True):
-            st.markdown("**Taxa de perdas por mês** (% do faturamento)")
+            st.markdown("**Taxa de perdas por mês** (% do faturamento · tracejado = meta)")
             d = m[["ano_mes", "taxa"]].copy()
             d["taxa"] *= 100
-            d["meta"] = CTX["meta"] * 100
+            d["meta"] = meta * 100
             base = alt.Chart(d).encode(x=alt.X("ano_mes:N", title=None))
             linha = base.mark_line(point=True, strokeWidth=2, color=COR["atencao"]).encode(
                 y=alt.Y("taxa:Q", title="%"),
@@ -282,27 +308,74 @@ def tela_veredito():
             st.altair_chart(linha + meta_l, width="stretch")
     with right:
         with st.container(border=True):
-            st.markdown("**Bater com o número da reunião**")
-            v = st.number_input("Valor apresentado (R$/mês)", value=0.0, step=1000.0)
-            pp = st.number_input("ou % apresentado", value=0.0, step=0.1) / 100
-            pm = m["perda"].mean()
-            if v and pm:
-                st.write(f"Dados: **{BRL(pm)}/mês** · diferença "
-                         f"**{BRL(v - pm)}** ({(v/pm-1)*100:+.0f}%)")
-            elif v:
-                st.write(f"Dados: **{BRL(pm)}/mês** · diferença **{BRL(v - pm)}**")
-            if pp and taxa:
-                st.write(f"Dados: **{PCT(taxa)}** · diferença **{(pp-taxa)*100:+.2f} p.p.**")
+            st.markdown("**Lojas por taxa de perdas** (% no período · tracejado = meta)")
+            rl = (CTX["taxa_lm"].dropna(subset=["faturamento"])
+                  .groupby("loja", as_index=False)
+                  .agg(perda=("perda", "sum"), faturamento=("faturamento", "sum")))
+            if rl.empty:
+                st.caption("Nenhuma loja com faturamento no recorte.")
+            else:
+                rl["taxa"] = rl["perda"] / rl["faturamento"] * 100
+                rl["loja"] = rl["loja"].astype("Int64").astype(str)
+                rl["nivel"] = rl["taxa"].map(lambda t: _cor_taxa(t / 100, meta))
+                barras = alt.Chart(rl).mark_bar().encode(
+                    x=alt.X("taxa:Q", title="% do faturamento"),
+                    y=alt.Y("loja:N", sort="-x", title="Loja"),
+                    color=alt.Color("nivel:N", scale=alt.Scale(
+                        domain=["ok", "atencao", "critico"],
+                        range=[COR["ok"], COR["atencao"], COR["critico"]]), legend=None),
+                    tooltip=["loja", alt.Tooltip("taxa:Q", title="taxa %", format=".2f"),
+                             alt.Tooltip("perda:Q", title="perda R$", format=",.0f"),
+                             alt.Tooltip("faturamento:Q", title="faturamento R$", format=",.0f")])
+                meta_r = alt.Chart(pd.DataFrame({"m": [meta * 100]})).mark_rule(
+                    strokeDash=[4, 4], color="#94A3B8").encode(x="m:Q")
+                st.altair_chart(barras + meta_r, width="stretch")
 
+    # ---- bridge de escopo + top motivos ---------------------------- #
+    p = CTX["perdas"]
+    if not CTX["incluir_dep"]:
+        p = p[~p["is_dep"]]
+    p = p[p["motivo_cat"] != "ignorar"].copy()
+    meses_cf = CTX["cob"]["meses_com_faturamento"]
+    p_cf = p[p["ano_mes"].isin(meses_cf)]
+    nmes = CTX["n_meses"]
+
+    left, right = st.columns(2)
+    with left:
+        with st.container(border=True):
+            st.markdown("**Bridge de escopo** — mesmo relatório, três recortes")
+            for key, rot in [("vencido", "Somente vencidos"),
+                             ("perda_real", "Perda real"),
+                             ("todos", "Todos os motivos")]:
+                v_mes = p.loc[p["motivo_cat"].map(lambda c: core.in_escopo(c, key)),
+                              "valor_total"].sum() / nmes
+                pf = ((p_cf.loc[p_cf["motivo_cat"].map(lambda c: core.in_escopo(c, key)),
+                                "valor_total"].sum() / fat_tot) if fat_tot else float("nan"))
+                st.metric(rot, BRL(v_mes) + " /mês",
+                          delta=PCT(pf) + " do faturamento", delta_color="off", border=True)
+    with right:
+        with st.container(border=True):
+            st.markdown("**Top motivos** (R$ no período · cor = classe)")
+            gm = (p.assign(classe=p["motivo_cat"].map(core.classe_motivo))
+                  .groupby(["motivo_label", "classe"], as_index=False)["valor_total"].sum()
+                  .sort_values("valor_total", ascending=False).head(8))
+            ch = alt.Chart(gm).mark_bar().encode(
+                x=alt.X("valor_total:Q", title="R$ no período"),
+                y=alt.Y("motivo_label:N", sort="-x", title=None),
+                color=alt.Color("classe:N", scale=alt.Scale(
+                    domain=list(CLASSE_COR), range=list(CLASSE_COR.values())),
+                    legend=alt.Legend(orient="bottom", title=None)),
+                tooltip=["motivo_label", "classe",
+                         alt.Tooltip("valor_total:Q", format=",.0f")])
+            st.altair_chart(ch, width="stretch")
+
+    # ---- meses sem faturamento (perda em R$) ---------------------- #
     cob = CTX["cob"]
     meses_sf = cob["meses_sem_faturamento"]
     if meses_sf:
-        p = CTX["perdas"]
-        if not CTX["incluir_dep"]:
-            p = p[~p["is_dep"]]
-        p = p[p["motivo_cat"].map(lambda c: core.in_escopo(c, esc))
-              & p["ano_mes"].isin(meses_sf)]
-        mm = p.groupby("ano_mes", as_index=False)["valor_total"].sum()
+        ps = p[p["motivo_cat"].map(lambda c: core.in_escopo(c, esc))
+               & p["ano_mes"].isin(meses_sf)]
+        mm = ps.groupby("ano_mes", as_index=False)["valor_total"].sum()
         if not mm.empty:
             with st.container(border=True):
                 st.markdown("**Meses sem faturamento informado** — perda em R$ "
@@ -314,6 +387,19 @@ def tela_veredito():
                     y=alt.Y("valor_total:Q", title="R$ perda"),
                     tooltip=["ano_mes", alt.Tooltip("valor_total:Q", format=",.0f")])
                 st.altair_chart(ch, width="stretch")
+
+    # ---- bater com o número da reunião --------------------------- #
+    with st.expander("Bater com o número da reunião", icon=":material/calculate:"):
+        v = st.number_input("Valor apresentado (R$/mês)", value=0.0, step=1000.0)
+        pp = st.number_input("ou % apresentado", value=0.0, step=0.1) / 100
+        pm = m["perda"].mean()
+        if v and pm:
+            st.write(f"Dados: **{BRL(pm)}/mês** · diferença "
+                     f"**{BRL(v - pm)}** ({(v/pm-1)*100:+.0f}%)")
+        elif v:
+            st.write(f"Dados: **{BRL(pm)}/mês** · diferença **{BRL(v - pm)}**")
+        if pp and taxa_pond:
+            st.write(f"Dados: **{PCT(taxa_pond)}** · diferença **{(pp-taxa_pond)*100:+.2f} p.p.**")
 
     if meses_sf or cob["lojas_sem_faturamento"]:
         avisos = []
@@ -328,9 +414,6 @@ def tela_veredito():
 # =========================================================================== #
 # TELA 2 — MOTIVOS (de-para: o que é perda de verdade e o que não é)
 # =========================================================================== #
-CLASSE_COR = {"Vencido": "#F87171", "Outra perda real": "#FB923C", "Não é perda": "#94A3B8"}
-
-
 def tela_motivos():
     st.title("O que é o quê?")
     st.caption("Cada motivo de baixa de estoque: quanto pesa em R$ e em % do faturamento, "
@@ -751,7 +834,7 @@ def tela_regras():
 
 # --------------------------------------------------------------------------- #
 nav = st.navigation([
-    st.Page(tela_veredito, title="Veredito", icon=":material/speed:", default=True),
+    st.Page(tela_veredito, title="Painel", icon=":material/speed:", default=True),
     st.Page(tela_motivos, title="Motivos", icon=":material/category:"),
     st.Page(tela_anatomia, title="Anatomia da perda", icon=":material/account_tree:"),
     st.Page(tela_baldes, title="Evitável x estrutural", icon=":material/rule:"),
