@@ -224,13 +224,14 @@ def _recorte_txt() -> str:
     return f"{a} · {b}"
 
 
-def _loja_local(df: pd.DataFrame, key: str) -> list[int]:
+def _loja_local(df: pd.DataFrame, key: str, container=None) -> list[int]:
     """Multiselect de Lojas dentro da tela, restringindo o recorte global.
     Não aparece quando o recorte já tem 0 ou 1 loja."""
+    c = container if container is not None else st
     lojas = sorted(int(x) for x in df["loja"].dropna().unique())
     if len(lojas) <= 1:
         return []
-    return st.multiselect(
+    return c.multiselect(
         "Lojas (nesta tela)", lojas, default=[], key=key,
         placeholder="todas as lojas do recorte",
         help="Restringe ainda mais dentro do filtro global da barra lateral.")
@@ -553,6 +554,22 @@ def _picked(event, field):
     return [r[field] for r in linhas if isinstance(r, dict) and field in r]
 
 
+MACRO_ROT = {"medicamento": "Medicamento", "nao-medicamento": "Não-medicamento",
+             "sem classificacao": "Sem classificação"}
+ORD_CURVA = ["A–D (relevante)", "E–G (média)", "H–I (cauda)", "Sem cadastro"]
+
+
+def _cg(s) -> str:
+    x = str(s).upper()
+    if x in list("ABCD"):
+        return ORD_CURVA[0]
+    if x in list("EFG"):
+        return ORD_CURVA[1]
+    if x in list("HI"):
+        return ORD_CURVA[2]
+    return ORD_CURVA[3]
+
+
 def tela_anatomia():
     st.title("O que são esses itens?")
     if _falta_cadastro():
@@ -560,7 +577,15 @@ def tela_anatomia():
     vc = CTX["vclass"].copy()
     st.caption("Recorte (filtro global): " + _recorte_txt())
 
-    lsel = _loja_local(vc, "anat_lojas")
+    # ---- filtros da tela: mês e loja (dentro do recorte global) ---------- #
+    c_mes, c_loja = st.columns(2)
+    meses_disp = sorted(vc["ano_mes"].unique())
+    msel = c_mes.multiselect("Meses (nesta tela)", meses_disp, default=[],
+                             placeholder="todos os meses do recorte", key="anat_meses",
+                             help="Vazio = todos os meses do filtro global.")
+    if msel:
+        vc = vc[vc["ano_mes"].isin(msel)]
+    lsel = _loja_local(vc, "anat_lojas", c_loja)
     if lsel:
         vc = vc[vc["loja"].isin(lsel)]
 
@@ -568,61 +593,58 @@ def tela_anatomia():
         st.info("Sem vencidos nesse recorte.", icon=":material/info:")
         return
     tot = vc["valor_total"].sum() or 1.0
-
-    cr, cm = st.columns(2)
-    # qual curva usar p/ agrupar (vale p/ o gráfico "Tem curva?" e o filtro da tabela)
-    qual = cr.radio("Curva para os gráficos",
-                    ["Curva de valor", "Curva de quantidade"],
-                    horizontal=True, key="anat_curva")
-    col_curva = "curva_qtd" if qual == "Curva de quantidade" else "curva_valor"
-    # medida do eixo dos gráficos: R$ vencido ou nº de unidades vencidas
-    medida = cm.radio("Medida dos gráficos", ["R$ vencido", "Unidades"],
-                      horizontal=True, key="anat_medida")
-    mcol = "valor_total" if medida == "R$ vencido" else "itens"
-    mtitle = "R$ vencido" if medida == "R$ vencido" else "Unidades vencidas"
     tip_val = alt.Tooltip("valor_total:Q", title="R$ vencido", format=",.0f")
     tip_itens = alt.Tooltip("itens:Q", title="Unidades", format=",.0f")
-    ORD_CURVA = ["A–D (relevante)", "E–G (média)", "H–I (cauda)", "Sem cadastro"]
 
-    def _cg(s):
-        x = str(s).upper()
-        if x in list("ABCD"):
-            return ORD_CURVA[0]
-        if x in list("EFG"):
-            return ORD_CURVA[1]
-        if x in list("HI"):
-            return ORD_CURVA[2]
-        return ORD_CURVA[3]
-
-    vc["cg"] = vc[col_curva].map(_cg)
-
+    # ---- macro: medicamento / não / sem classificação ----------------- #
     macro = (vc.groupby("macro", as_index=False)["valor_total"].sum()
              .sort_values("valor_total", ascending=False))
     macro["pct"] = macro["valor_total"] / tot
     with st.container(horizontal=True):
         for _, r in macro.iterrows():
-            st.metric(r["macro"].capitalize(), BRL(r["valor_total"]),
+            st.metric(MACRO_ROT.get(r["macro"], r["macro"].capitalize()),
+                      BRL(r["valor_total"]),
                       delta=f"{r['pct']*100:.0f}% do vencido", delta_color="off", border=True)
+    sc = macro.loc[macro["macro"] == "sem classificacao", "valor_total"].sum()
+    if sc:
+        st.caption(f":material/help: **Sem classificação** = {BRL(sc)} em itens sem "
+                   "`classif` no cadastro (não caem em medicamento nem não-medicamento). "
+                   "Escolha \"Só sem classificação\" no seletor **Ver** para listá-los "
+                   "na tabela do fim da página.")
 
-    st.caption("Clique numa barra dos gráficos abaixo para filtrar a tabela de "
-               "produtos no fim da página. Clique de novo na mesma barra para limpar.")
+    if "anat_nonce" not in st.session_state:
+        st.session_state["anat_nonce"] = 0
+    nk = st.session_state["anat_nonce"]
+
+    st.caption("Clique numa barra para filtrar a tabela de produtos no fim da página; "
+               "clique de novo na mesma barra para soltar. Ou use "
+               "\"Limpar filtros dos gráficos\".")
 
     left, right = st.columns(2)
     with left:
         with st.container(border=True):
-            st.markdown("**Por categoria da árvore mercadológica**")
+            h, ctrl = st.columns([3, 2], vertical_alignment="center")
+            h.markdown("**Por categoria da árvore mercadológica**")
+            medida = ctrl.radio("Medida", ["R$ vencido", "Unidades"], horizontal=True,
+                                key="anat_medida", label_visibility="collapsed",
+                                help="Eixo dos três gráficos: R$ vencido ou nº de unidades.")
+            mcol = "valor_total" if medida == "R$ vencido" else "itens"
+            mtitle = "R$ vencido" if medida == "R$ vencido" else "Unidades vencidas"
             gsel = st.segmented_control(
-                "Ver", ["Todas", "Só medicamento", "Só não-medicamento"],
+                "Ver", ["Todas", "Só medicamento", "Só não-medicamento",
+                        "Só sem classificação"],
                 default="Todas", label_visibility="collapsed", key="anat_ver")
-            d = vc
+            d0 = vc
             if gsel == "Só medicamento":
-                d = vc[vc["macro"] == "medicamento"]
+                d0 = vc[vc["macro"] == "medicamento"]
             elif gsel == "Só não-medicamento":
-                d = vc[vc["macro"] == "nao-medicamento"]
-            cat = (d.groupby("cat1", as_index=False)
+                d0 = vc[vc["macro"] == "nao-medicamento"]
+            elif gsel == "Só sem classificação":
+                d0 = vc[vc["macro"] == "sem classificacao"]
+            cat = (d0.groupby("cat1", as_index=False)
                    .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum"))
                    .sort_values(mcol, ascending=False).head(12))
-            sel_cat = alt.selection_point(fields=["cat1"], name="pcat")
+            sel_cat = alt.selection_point(fields=["cat1"], name="pcat", toggle="true")
             ch = (alt.Chart(cat).mark_bar(color="#60A5FA").encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
                 y=alt.Y("cat1:N", sort="-x", title=None),
@@ -630,13 +652,19 @@ def tela_anatomia():
                 tooltip=["cat1", tip_val, tip_itens])
                 .add_params(sel_cat))
             ev_cat = st.altair_chart(ch, width="stretch", on_select="rerun",
-                                     key="anat_ch_cat")
+                                     key=f"anat_ch_cat_{nk}")
     with right:
         with st.container(border=True):
-            st.markdown(f"**Tem curva?** ({qual.lower()} · {mtitle.lower()})")
+            h, ctrl = st.columns([3, 2], vertical_alignment="center")
+            h.markdown("**Tem curva?**")
+            qual = ctrl.radio("Curva", ["Valor", "Quantidade"], horizontal=True,
+                              key="anat_curva", label_visibility="collapsed",
+                              help="Curva de valor ou curva de quantidade do cadastro.")
+            col_curva = "curva_qtd" if qual == "Quantidade" else "curva_valor"
+            vc["cg"] = vc[col_curva].map(_cg)
             g = (vc.groupby("cg", as_index=False)
                  .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum")))
-            sel_cv = alt.selection_point(fields=["cg"], name="pcg")
+            sel_cv = alt.selection_point(fields=["cg"], name="pcg", toggle="true")
             ch = (alt.Chart(g).mark_bar().encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
                 y=alt.Y("cg:N", sort=ORD_CURVA, title=None),
@@ -647,12 +675,12 @@ def tela_anatomia():
                 tooltip=["cg", tip_val, tip_itens])
                 .add_params(sel_cv))
             ev_cv = st.altair_chart(ch, width="stretch", on_select="rerun",
-                                    key="anat_ch_cv")
+                                    key=f"anat_ch_cv_{nk}")
             st.markdown("**Quanto tempo parado quando venceu**")
             fg = (vc.groupby("faixa_giro", as_index=False)
                   .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum")))
             ordem_g = [x[2] for x in core.FAIXAS_GIRO] + ["Sem cadastro"]
-            sel_g = alt.selection_point(fields=["faixa_giro"], name="pgiro")
+            sel_g = alt.selection_point(fields=["faixa_giro"], name="pgiro", toggle="true")
             ch2 = (alt.Chart(fg).mark_bar(color="#FB923C").encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
                 y=alt.Y("faixa_giro:N", sort=ordem_g, title=None),
@@ -660,7 +688,7 @@ def tela_anatomia():
                 tooltip=["faixa_giro", tip_val, tip_itens])
                 .add_params(sel_g))
             ev_g = st.altair_chart(ch2, width="stretch", on_select="rerun",
-                                   key="anat_ch_giro")
+                                   key=f"anat_ch_giro_{nk}")
 
     # ---- tabela de produtos, filtrada pelo que foi clicado nos gráficos ---- #
     d = vc
@@ -668,27 +696,28 @@ def tela_anatomia():
     cats_sel = _picked(ev_cat, "cat1")
     if cats_sel:
         d = d[d["cat1"].isin(cats_sel)]
-        filtros.append(("Categoria da árvore", ", ".join(map(str, cats_sel)),
-                        "Por categoria da árvore mercadológica"))
+        filtros.append(("Categoria", ", ".join(map(str, cats_sel))))
     cg_sel = _picked(ev_cv, "cg")
     if cg_sel:
         d = d[d["cg"].isin(cg_sel)]
-        filtros.append((qual, ", ".join(map(str, cg_sel)), "Tem curva?"))
+        filtros.append((f"Curva ({qual.lower()})", ", ".join(map(str, cg_sel))))
     giro_sel = _picked(ev_g, "faixa_giro")
     if giro_sel:
         d = d[d["faixa_giro"].isin(giro_sel)]
-        filtros.append(("Tempo parado", ", ".join(map(str, giro_sel)),
-                        "Quanto tempo parado quando venceu"))
+        filtros.append(("Tempo parado", ", ".join(map(str, giro_sel))))
+
+    if filtros and st.button("Limpar filtros dos gráficos",
+                             icon=":material/filter_alt_off:", key="anat_clear"):
+        st.session_state["anat_nonce"] += 1
+        st.rerun()
 
     with st.container(border=True):
         if filtros:
             st.markdown("**Produtos — " +
-                        " · ".join(f"{k}: {v}" for k, v, _ in filtros) + "**")
-            st.caption("Origem: " +
-                       " ; ".join(f'gráfico "{src}" → {v}' for _, v, src in filtros)
-                       + f". {len(d)} linhas de vencido, "
-                       + f"{BRL(d['valor_total'].sum())} no recorte. "
-                       "Clique de novo na barra para limpar o filtro.")
+                        " · ".join(f"{k}: {v}" for k, v in filtros) + "**")
+            st.caption(f"{len(d)} linhas de vencido · {BRL(d['valor_total'].sum())} · "
+                       f"{d['itens'].sum():,.0f} unidades no recorte filtrado."
+                       .replace(",", "."))
         else:
             st.markdown("**Produtos** — todos os itens vencidos do recorte")
             st.caption("Clique numa barra dos gráficos acima para filtrar aqui. "
@@ -698,14 +727,25 @@ def tela_anatomia():
                     curva_valor=("curva_valor", "first"), curva_qtd=("curva_qtd", "first"),
                     macro=("macro", "first"), cat=("cat1", "first"),
                     faixa_giro=("faixa_giro", "first"),
-                    dias_sem_vender=("ult_venda_dias", "max"), lojas=("loja", "nunique"))
+                    dias_sem_vender=("ult_venda_dias", "max"),
+                    n_lojas=("loja", "nunique"),
+                    lojas_ids=("loja", lambda s: ", ".join(
+                        str(int(x)) for x in sorted(s.dropna().unique()))))
                .sort_values("valor", ascending=False).head(300))
         st.dataframe(tab, hide_index=True, width="stretch", height=360,
                      column_config={
+                         "produto": "Produto",
                          "valor": st.column_config.NumberColumn("R$ vencido", format="R$ %.0f"),
+                         "itens": st.column_config.NumberColumn("Unidades vencidas", format="%.0f"),
                          "curva_valor": "Curva valor", "curva_qtd": "Curva qtd",
+                         "macro": "Categoria", "cat": "Árvore nível 1",
                          "faixa_giro": "Tempo parado",
-                         "dias_sem_vender": "Dias s/ vender"})
+                         "dias_sem_vender": "Dias s/ vender",
+                         "n_lojas": "Nº lojas",
+                         "lojas_ids": "Lojas (ID)"})
+        st.caption("As lojas são identificadas por número (2–25); não há nome de loja "
+                   "no relatório de perdas. **Lojas (ID)** lista as lojas que "
+                   "vencerem o item; **Unidades vencidas** é a quantidade total.")
         st.download_button("Baixar (CSV)", tab.to_csv(index=False).encode("utf-8-sig"),
                            "anatomia_produtos.csv", "text/csv",
                            icon=":material/download:", key="anat_dl")
