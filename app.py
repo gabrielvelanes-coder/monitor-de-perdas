@@ -649,18 +649,13 @@ def _picked(event, field):
 
 MACRO_ROT = {"medicamento": "Medicamento", "nao-medicamento": "Não-medicamento",
              "sem classificacao": "Sem classificação"}
-ORD_CURVA = ["A–D (relevante)", "E–G (média)", "H–I (cauda)", "Sem cadastro"]
+ORD_LETRA = list("ABCDEFGHI") + ["Sem cadastro"]
 
 
-def _cg(s) -> str:
-    x = str(s).upper()
-    if x in list("ABCD"):
-        return ORD_CURVA[0]
-    if x in list("EFG"):
-        return ORD_CURVA[1]
-    if x in list("HI"):
-        return ORD_CURVA[2]
-    return ORD_CURVA[3]
+def _cletra(s) -> str:
+    """Letra da curva (A…I) ou 'Sem cadastro'."""
+    x = str(s).strip().upper()
+    return x if x in set("ABCDEFGHI") else "Sem cadastro"
 
 
 def tela_anatomia():
@@ -706,15 +701,20 @@ def tela_anatomia():
     if vc.empty:
         st.info(f"Sem baixas de \"{mot_curto}\" nesse recorte.", icon=":material/info:")
         return
-    tot = vc["valor_total"].sum() or 1.0
-    tip_val = alt.Tooltip("valor_total:Q", title="R$ vencido", format=",.0f")
+    tot_real = vc["valor_total"].sum()
+    tot = tot_real or 1.0
+    und_real = int(vc["itens"].sum())
+    tip_val = alt.Tooltip("valor_total:Q", title="R$ perda", format=",.0f")
     tip_itens = alt.Tooltip("itens:Q", title="Unidades", format=",.0f")
 
-    # ---- macro: medicamento / não / sem classificação ----------------- #
+    # ---- macro: total + medicamento / não / sem classificação --------- #
     macro = (vc.groupby("macro", as_index=False)["valor_total"].sum()
              .sort_values("valor_total", ascending=False))
     macro["pct"] = macro["valor_total"] / tot
     with st.container(horizontal=True):
+        st.metric(f"Total — {mot_curto.lower()}", BRL(tot_real),
+                  delta=f"{und_real:,} unid · {len(vc):,} linhas".replace(",", "."),
+                  delta_color="off", border=True)
         for _, r in macro.iterrows():
             st.metric(MACRO_ROT.get(r["macro"], r["macro"].capitalize()),
                       BRL(r["valor_total"]),
@@ -759,49 +759,53 @@ def tela_anatomia():
                    .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum"))
                    .sort_values(mcol, ascending=False).head(12))
             sel_cat = alt.selection_point(fields=["cat1"], name="pcat", toggle="true")
-            ch = (alt.Chart(cat).mark_bar(color="#60A5FA").encode(
+            base_cat = alt.Chart(cat).encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
-                y=alt.Y("cat1:N", sort="-x", title=None),
+                y=alt.Y("cat1:N", sort="-x", title=None))
+            ch = (base_cat.mark_bar(color="#60A5FA").encode(
                 opacity=alt.condition(sel_cat, alt.value(1.0), alt.value(0.35)),
-                tooltip=["cat1", tip_val, tip_itens])
-                .add_params(sel_cat))
-            ev_cat = st.altair_chart(ch, width="stretch", on_select="rerun",
+                tooltip=["cat1", tip_val, tip_itens]).add_params(sel_cat))
+            lbl_cat = base_cat.mark_text(align="left", dx=4, color="#CBD5E1",
+                                         fontSize=11).encode(
+                text=alt.Text(f"{mcol}:Q", format=",.0f"))
+            ev_cat = st.altair_chart(ch + lbl_cat, width="stretch", on_select="rerun",
                                      key=f"anat_ch_cat_{nk}")
     with right:
         with st.container(border=True):
             h, ctrl = st.columns([3, 2], vertical_alignment="center")
-            h.markdown("**Tem curva?**")
+            h.markdown("**Curva**")
             qual = ctrl.radio("Curva", ["Valor", "Quantidade"], horizontal=True,
                               key="anat_curva", label_visibility="collapsed",
                               help="Curva de valor ou curva de quantidade do cadastro.")
             col_curva = "curva_qtd" if qual == "Quantidade" else "curva_valor"
-            vc["cg"] = vc[col_curva].map(_cg)
-            g = (vc.groupby("cg", as_index=False)
+            vc["cletra"] = vc[col_curva].map(_cletra)
+            g = (vc.groupby("cletra", as_index=False)
                  .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum")))
-            sel_cv = alt.selection_point(fields=["cg"], name="pcg", toggle="true")
-            ch = (alt.Chart(g).mark_bar().encode(
+            sel_cv = alt.selection_point(fields=["cletra"], name="pcg", toggle="true")
+            base_cv = alt.Chart(g).encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
-                y=alt.Y("cg:N", sort=ORD_CURVA, title=None),
-                color=alt.Color("cg:N", scale=alt.Scale(
-                    domain=ORD_CURVA, range=["#34D399", "#FBBF24", "#F87171", "#94A3B8"]),
-                    legend=None),
+                y=alt.Y("cletra:N", sort=ORD_LETRA, title=None))
+            ch = (base_cv.mark_bar(color="#60A5FA").encode(
                 opacity=alt.condition(sel_cv, alt.value(1.0), alt.value(0.35)),
-                tooltip=["cg", tip_val, tip_itens])
-                .add_params(sel_cv))
-            ev_cv = st.altair_chart(ch, width="stretch", on_select="rerun",
+                tooltip=["cletra", tip_val, tip_itens]).add_params(sel_cv))
+            lbl_cv = base_cv.mark_text(align="left", dx=4, color="#CBD5E1", fontSize=11).encode(
+                text=alt.Text(f"{mcol}:Q", format=",.0f"))
+            ev_cv = st.altair_chart(ch + lbl_cv, width="stretch", on_select="rerun",
                                     key=f"anat_ch_cv_{nk}")
             st.markdown("**Quanto tempo parado quando venceu**")
             fg = (vc.groupby("faixa_giro", as_index=False)
                   .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum")))
             ordem_g = [x[2] for x in core.FAIXAS_GIRO] + ["Sem cadastro"]
             sel_g = alt.selection_point(fields=["faixa_giro"], name="pgiro", toggle="true")
-            ch2 = (alt.Chart(fg).mark_bar(color="#FB923C").encode(
+            base_g = alt.Chart(fg).encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
-                y=alt.Y("faixa_giro:N", sort=ordem_g, title=None),
+                y=alt.Y("faixa_giro:N", sort=ordem_g, title=None))
+            ch2 = (base_g.mark_bar(color="#FB923C").encode(
                 opacity=alt.condition(sel_g, alt.value(1.0), alt.value(0.35)),
-                tooltip=["faixa_giro", tip_val, tip_itens])
-                .add_params(sel_g))
-            ev_g = st.altair_chart(ch2, width="stretch", on_select="rerun",
+                tooltip=["faixa_giro", tip_val, tip_itens]).add_params(sel_g))
+            lbl_g = base_g.mark_text(align="left", dx=4, color="#CBD5E1", fontSize=11).encode(
+                text=alt.Text(f"{mcol}:Q", format=",.0f"))
+            ev_g = st.altair_chart(ch2 + lbl_g, width="stretch", on_select="rerun",
                                    key=f"anat_ch_giro_{nk}")
 
     # ---- tabela de produtos, filtrada pelo que foi clicado nos gráficos ---- #
@@ -811,9 +815,9 @@ def tela_anatomia():
     if cats_sel:
         d = d[d["cat1"].isin(cats_sel)]
         filtros.append(("Categoria", ", ".join(map(str, cats_sel))))
-    cg_sel = _picked(ev_cv, "cg")
+    cg_sel = _picked(ev_cv, "cletra")
     if cg_sel:
-        d = d[d["cg"].isin(cg_sel)]
+        d = d[d["cletra"].isin(cg_sel)]
         filtros.append((f"Curva ({qual.lower()})", ", ".join(map(str, cg_sel))))
     giro_sel = _picked(ev_g, "faixa_giro")
     if giro_sel:
@@ -852,7 +856,8 @@ def tela_anatomia():
         st.dataframe(tab, hide_index=True, width="stretch", height=360,
                      column_config={
                          "produto": "Produto",
-                         "valor": st.column_config.NumberColumn("R$", format="R$ %.0f"),
+                         "valor": st.column_config.NumberColumn("Total perda (R$)",
+                                                                format="R$ %.0f"),
                          "itens": st.column_config.NumberColumn("Unidades", format="%.0f"),
                          "curva_valor": "Curva valor", "curva_qtd": "Curva qtd",
                          "macro": "Categoria", "cat": "Árvore nível 1",
