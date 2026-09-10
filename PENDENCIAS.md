@@ -65,6 +65,15 @@ Enquanto não conectar, dados do Power BI entram por print/export manual.
 
 ## FEITO NESTA SESSÃO (2026-09-10)
 
+### Commit `7fb754d` — Painel com filtro de mês/loja na tela
+Feedback do Gabriel: o Painel também precisa de filtro e informações no recorte.
+- Multiselect **"Meses (nesta tela)"** e **"Lojas (nesta tela)"** no topo do
+  Painel (dentro do recorte global). `taxa_lm` / `mensal` / `cobertura` / `vclass`
+  passam a ser recalculados a partir do recorte da tela — os 4 KPIs, o ranking de
+  lojas, o bridge de escopo e o bloco "meses sem faturamento" respondem aos
+  filtros. Conferido: mês = 2026-08 → fat 8.637.085 · perda 52.576 · taxa 0,61 % ·
+  bridge 52.576 / 56.588 / 83.265 (bate com a decomposição de agosto abaixo).
+
 ### Commits `82fb613` + `e770596` — Seletores por tela + revisão da Anatomia
 Feedback do Gabriel: além do filtro global, quer seletor de loja/mês nas telas.
 - `82fb613`: helper `_loja_local(df, key)` — multiselect "Lojas (nesta tela)" em
