@@ -76,6 +76,26 @@ Agora dá para puxar dados do Power BI pela extensão em vez de print manual.
 
 ## FEITO NESTA SESSÃO (2026-09-10)
 
+### Commit `f30429b` — Anatomia: motivo flexível + "ver tudo" (feedback do Gabriel)
+Gabriel comparou o relatório do sistema (loja 16, ago, AÇÃO DE MARKETING → item
+LANCETA ACCU CHECK R$ 10.029,36) e não achou o item na Anatomia. Causa: o filtro
+**"Status no catálogo = Ativos"** escondia silenciosamente a linha — o produto
+`LANCETA ACCU CHECK SAFE-T-PRO UNO CX C/ 200` **não casa** com o catálogo (que
+tem `... UNO`, sem o `CX C/ 200`), então caiu em "fora do catálogo".
+- Seletor de motivo: segmented **Vencido / Perda real / Todos** + multiselect
+  **"…ou motivos específicos"** que sobrepõe. (`_cats_do_escopo`; `MOTIVO_OPCOES`
+  saiu.)
+- Novo expander **"Motivos no recorte"** — tabela R$/unid/linhas/produtos/% +
+  barra por motivo.
+- Tabela de produtos agrupa por **(produto, motivo)**, ganha coluna **Motivo**;
+  head 300→500; CSV baixa tudo.
+- **Avisos de linha escondida:** warning quando "Status no catálogo" ≠ Todos
+  esconde R$; caption do R$ fora do filtro dos gráficos.
+- **Fragilidade conhecida:** o join catálogo↔perda é por descrição exata
+  normalizada; variações de embalagem no nome ("... UNO" vs "... UNO CX C/ 200")
+  não casam → item vira "fora do catálogo". Cobertura ~99 %, mas linhas grandes
+  podem cair fora. Se virar problema, casar por `Código` em vez de descrição.
+
 ### Commit `c5ecc70` — Anatomia: ajustes de leitura (feedback do Gabriel)
 Cartão **"Total — <motivo>"** na linha de KPIs (R$ + unidades + linhas). Gráfico
 "Tem curva?" → **"Curva"**, estratificado por letra **A…I** (+ "Sem cadastro")
