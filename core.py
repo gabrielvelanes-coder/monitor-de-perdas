@@ -491,19 +491,10 @@ def cobertura_faturamento(perdas: pd.DataFrame, fat: pd.DataFrame) -> dict:
 # 6. anatomia dos vencidos: medicamento x não, categoria, curva, diagnóstico
 # ----------------------------------------------------------------------------- #
 
-# nível 1 da árvore mercadológica -> medicamento sim/não (a árvore do cliente)
-_N1_MEDICAMENTO = {
-    "PROPAGADO", "GENERICOS", "GENERICO", "SIMILARES", "SIMILAR", "ETICOS",
-    "ETICO", "ETICOS/MIP", "OTC", "MIP", "OTC/MIP", "CONTROLADOS", "CONTROLADO",
-    "MEDICAMENTOS", "PERFUMARIA ETICA", "GENERICOS E SIMILARES",
-}
-_N1_NAO_MED = {
-    "DERMOCOSMETICOS", "SUPLEMENTOS", "CUIDADOS COM A PELE", "MUNDO INFANTIL",
-    "HIGIENE INTIMA", "HIGIENE", "HIGIENE E BELEZA", "CABELO", "BELEZA",
-    "CONVENIENCIA", "PERFUMARIA", "CUIDADOS COM A SAUDE", "MAKE", "NUTRICAO",
-    "DIETETICOS", "BEM ESTAR", "CUIDADOS PESSOAIS", "PRIMEIROS SOCORROS",
-    "ORTOPEDIA", "NUTRICAO E DIETETICOS", "SAUDE E BEM ESTAR",
-}
+# Regra do cliente (Gabriel, 2026-09-10): no nível 1 da árvore mercadológica,
+# só GENÉRICO / SIMILAR / PROPAGADO são medicamento; todo o resto que tem
+# categoria é não-medicamento; sem categoria fica "sem classificacao".
+_N1_MEDICAMENTO_PREFIXOS = ("GENERIC", "SIMILAR", "PROPAGAD")
 
 
 def _arvore_niveis(classif) -> tuple[str, str]:
@@ -517,23 +508,15 @@ def _arvore_niveis(classif) -> tuple[str, str]:
 
 
 def macro_categoria(classif) -> str:
-    n1, n2 = _arvore_niveis(classif)
+    """medicamento se o nível 1 for genérico / similar / propagado; qualquer outra
+    categoria é não-medicamento; sem categoria vira 'sem classificacao'."""
+    n1, _ = _arvore_niveis(classif)
     a1 = _ascii(n1)
     if not a1:
         return "sem classificacao"
-    if a1 in _N1_MEDICAMENTO:
+    if a1.startswith(_N1_MEDICAMENTO_PREFIXOS):
         return "medicamento"
-    if a1 in _N1_NAO_MED:
-        return "nao-medicamento"
-    # fallback pelo nível 2
-    a2 = _ascii(n2)
-    if any(k in a2 for k in ("CONTROLADO", "RX", "USO CONTINUO", "ANTIMICROBIANO",
-                             "INJETAVEL", "PBM", "GLP1", "OTC", "MIP")):
-        return "medicamento"
-    if any(k in a2 for k in ("PELE", "CABELO", "SOLAR", "SUPLEMENT", "INFANTIL",
-                             "HIGIENE", "MAQUIAGEM", "PERFUME")):
-        return "nao-medicamento"
-    return "indefinido"
+    return "nao-medicamento"
 
 
 # baldes de diagnóstico: onde a perda foi decidida
