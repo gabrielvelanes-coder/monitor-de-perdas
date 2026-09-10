@@ -12,13 +12,14 @@ Período viraram dois multiselect no `build_context` (vazio = tudo), aplicados e
 `lojas_sel` / `meses_sel` / `perdas_full`. `tela_motivos` e `tela_anatomia`
 perderam os multiselect locais; todas as telas mostram "Recorte (filtro global)".
 
-**b) Veredito → "Painel". — RETOMAR AQUI.** Vira o dashboard-resumo. Topo: faturamento · perda R$
-(no escopo) · taxa % · gap vs meta (0,40%). Abaixo: evolução mensal (taxa × meta),
-ranking de lojas por taxa, mini-bridge de motivos (vencido / perda real / todos),
-top motivos. Tudo respeitando o filtro global. Reaproveitar o que já existe hoje
-na `tela_veredito` + pedaços da `tela_motivos`.
+**b) Veredito → "Painel".** ✅ FEITO — commit `55eb5d6`. `st.Page` renomeado.
+Topo com 4 KPIs (faturamento no período · perda no escopo · taxa ponderada · gap
+vs meta em p.p.). Diagnóstico (semáforo + frase) mantido. Evolução mensal ao lado
+de ranking de lojas por taxa (barras no semáforo + régua da meta). Bridge de
+escopo + top motivos reaproveitados da tela Motivos. "Bater com o número da
+reunião" foi para um expander. Helpers novos: `CLASSE_COR`, `_cor_taxa`.
 
-**c) Anatomia com seletor de motivo.** Hoje `_vclass` (app.py) é travado em
+**c) Anatomia com seletor de motivo. — RETOMAR AQUI.** Hoje `_vclass` (app.py) é travado em
 `("vencido",)`. Destravar: seletor de motivo (vencido / danificado / furto /
 "perda real" / todos) que recria o enriquecimento e recalcula medicamento /
 curva / giro. `core.enriquecer_vencidos` já aceita `cats=` — falta expor na UI e
@@ -63,6 +64,39 @@ Enquanto não conectar, dados do Power BI entram por print/export manual.
 ---
 
 ## FEITO NESTA SESSÃO (2026-09-10)
+
+### Commits `82fb613` + `e770596` — Seletores por tela + revisão da Anatomia
+Feedback do Gabriel: além do filtro global, quer seletor de loja/mês nas telas.
+- `82fb613`: helper `_loja_local(df, key)` — multiselect "Lojas (nesta tela)" em
+  Motivos, Anatomia e Evitável x estrutural, restringe dentro do recorte global;
+  some quando o recorte já tem ≤ 1 loja.
+- `e770596` (Anatomia): filtro de **Meses (nesta tela)** ao lado do de Lojas
+  (`_loja_local` aceita `container=`). Radios **Medida** (R$/Unidades) e **Curva**
+  (Valor/Qtd) movidos para dentro dos containers dos gráficos. Cliques nos
+  gráficos com `selection_point(toggle="true")` (re-clique solta) + botão
+  **"Limpar filtros dos gráficos"** que reseta via nonce nas `key` dos charts.
+  "Sem classificação" com rótulo próprio + aviso + opção "Só sem classificação"
+  no seletor *Ver*. Tabela: coluna `lojas` (nunique) virou **Nº lojas** +
+  **Lojas (ID)** (lista dos números); `itens` → "Unidades vencidas". Não há nome
+  de loja no relatório de perdas, só número (2–25).
+- **A verificar com o Gabriel no app:** o clique-para-filtrar da Anatomia (se o
+  problema era "não limpa", o `toggle="true"` resolve; se era "não filtra nada",
+  precisa de teste no navegador — a extensão Chrome não conecta nesta máquina).
+
+### Commit `55eb5d6` — Veredito vira "Painel" (item 0b)
+- `st.Page` renomeado Veredito → **Painel**. Topo com 4 KPIs: Faturamento no
+  período · Perda no período (escopo) · Taxa ponderada (perda ÷ fat) · Gap vs
+  meta em p.p. Diagnóstico (semáforo + frase) mantido; cai para
+  `_cor_taxa(taxa_ponderada)` quando falta cadastro.
+- Evolução mensal (taxa × meta) ao lado de **ranking de lojas por taxa** (barras
+  no semáforo + régua da meta, vindo de `CTX["taxa_lm"]`).
+- **Bridge de escopo** (vencido / perda real / todos — R$/mês + % fat) e **top
+  motivos** (barra colorida por classe) reaproveitados da tela Motivos.
+- "Meses sem faturamento" mantido; "Bater com o número da reunião" foi p/ um
+  expander no rodapé. Helpers novos no topo: `CLASSE_COR`, `_cor_taxa(taxa, meta)`
+  (mesma régua de `core.frase_diagnostico`); `CLASSE_COR` duplicado saiu de Motivos.
+- Conferência sem filtro: fat R$ 69,69 M · taxa 0,53 % · bridge 0,55 / 0,58 /
+  0,69 % — bate com a tabela do faturamento mensal.
 
 ### Commit `57f2dec` — Filtros globais de Loja e Período (item 0a)
 - `build_context`: bloco "### Filtros" na sidebar com dois multiselect —
