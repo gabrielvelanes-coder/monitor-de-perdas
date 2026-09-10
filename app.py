@@ -115,7 +115,7 @@ def build_context() -> dict:
     escopo = st.sidebar.segmented_control(
         "Escopo", list(core.ESCOPOS), format_func=lambda k: core.ESCOPOS[k].split(" (")[0],
         default="vencido", selection_mode="single") or "vencido"
-    meta = st.sidebar.slider("Meta (% do faturamento)", 0.1, 1.5, 0.5, 0.05,
+    meta = st.sidebar.slider("Meta (% do faturamento)", 0.1, 1.5, 0.40, 0.05,
                              format="%.2f%%") / 100
     incluir_dep = st.sidebar.toggle("Incluir depósito (DEP)", value=False)
 
@@ -311,16 +311,27 @@ def tela_motivos():
     p["classe"] = p["motivo_cat"].map(core.classe_motivo)
 
     fat = CTX["fat"]
+    c_mes, c_loja = st.columns(2)
+
+    lojas = sorted(int(x) for x in p["loja"].dropna().unique())
+    sel_l = c_loja.multiselect("Lojas", lojas, default=[],
+                               placeholder="todas as lojas", key="mot_lojas")
+    if sel_l:
+        p = p[p["loja"].isin(sel_l)]
+        fat = fat[fat["loja"].isin(sel_l)] if not fat.empty else fat
+
     meses_all = sorted(p["ano_mes"].unique())
     meses_com_fat = (sorted(set(fat["ano_mes"].unique()) & set(meses_all))
                      if not fat.empty else [])
     default_meses = meses_com_fat or meses_all
-    sel = st.multiselect("Meses", meses_all, default=default_meses,
-                         placeholder="todos os meses")
+    sel = c_mes.multiselect("Meses", meses_all, default=default_meses,
+                            placeholder="todos os meses", key="mot_meses")
     if not sel:
         sel = meses_all
     p = p[p["ano_mes"].isin(sel)]
     n_meses = len(sel)
+    if sel_l:
+        st.caption("Recorte: loja " + ", ".join(str(x) for x in sel_l))
 
     meses_sel_com_fat = [m for m in sel if m in meses_com_fat]
     meses_sel_sem_fat = [m for m in sel if m not in meses_com_fat]
@@ -445,10 +456,19 @@ def tela_anatomia():
         return
     tot = vc["valor_total"].sum() or 1.0
 
-    # curva escolhida (vale para o gráfico e para o filtro da tabela)
-    qual = st.radio("Curva para os gráficos", ["Curva de valor", "Curva de quantidade"],
+    cr, cm = st.columns(2)
+    # qual curva usar p/ agrupar (vale p/ o gráfico "Tem curva?" e o filtro da tabela)
+    qual = cr.radio("Curva para os gráficos",
+                    ["Curva de valor", "Curva de quantidade"],
                     horizontal=True, key="anat_curva")
     col_curva = "curva_qtd" if qual == "Curva de quantidade" else "curva_valor"
+    # medida do eixo dos gráficos: R$ vencido ou nº de unidades vencidas
+    medida = cm.radio("Medida dos gráficos", ["R$ vencido", "Unidades"],
+                      horizontal=True, key="anat_medida")
+    mcol = "valor_total" if medida == "R$ vencido" else "itens"
+    mtitle = "R$ vencido" if medida == "R$ vencido" else "Unidades vencidas"
+    tip_val = alt.Tooltip("valor_total:Q", title="R$ vencido", format=",.0f")
+    tip_itens = alt.Tooltip("itens:Q", title="Unidades", format=",.0f")
     ORD_CURVA = ["A–D (relevante)", "E–G (média)", "H–I (cauda)", "Sem cadastro"]
 
     def _cg(s):
@@ -486,42 +506,45 @@ def tela_anatomia():
                 d = vc[vc["macro"] == "medicamento"]
             elif gsel == "Só não-medicamento":
                 d = vc[vc["macro"] == "nao-medicamento"]
-            cat = (d.groupby("cat1", as_index=False)["valor_total"].sum()
-                   .sort_values("valor_total", ascending=False).head(12))
+            cat = (d.groupby("cat1", as_index=False)
+                   .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum"))
+                   .sort_values(mcol, ascending=False).head(12))
             sel_cat = alt.selection_point(fields=["cat1"], name="pcat")
             ch = (alt.Chart(cat).mark_bar(color="#60A5FA").encode(
-                x=alt.X("valor_total:Q", title="R$ vencido"),
+                x=alt.X(f"{mcol}:Q", title=mtitle),
                 y=alt.Y("cat1:N", sort="-x", title=None),
                 opacity=alt.condition(sel_cat, alt.value(1.0), alt.value(0.35)),
-                tooltip=["cat1", alt.Tooltip("valor_total:Q", format=",.0f")])
+                tooltip=["cat1", tip_val, tip_itens])
                 .add_params(sel_cat))
             ev_cat = st.altair_chart(ch, width="stretch", on_select="rerun",
                                      key="anat_ch_cat")
     with right:
         with st.container(border=True):
-            st.markdown(f"**Tem curva?** ({qual.lower()})")
-            g = vc.groupby("cg", as_index=False)["valor_total"].sum()
+            st.markdown(f"**Tem curva?** ({qual.lower()} · {mtitle.lower()})")
+            g = (vc.groupby("cg", as_index=False)
+                 .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum")))
             sel_cv = alt.selection_point(fields=["cg"], name="pcg")
             ch = (alt.Chart(g).mark_bar().encode(
-                x=alt.X("valor_total:Q", title="R$ vencido"),
+                x=alt.X(f"{mcol}:Q", title=mtitle),
                 y=alt.Y("cg:N", sort=ORD_CURVA, title=None),
                 color=alt.Color("cg:N", scale=alt.Scale(
                     domain=ORD_CURVA, range=["#34D399", "#FBBF24", "#F87171", "#94A3B8"]),
                     legend=None),
                 opacity=alt.condition(sel_cv, alt.value(1.0), alt.value(0.35)),
-                tooltip=["cg", alt.Tooltip("valor_total:Q", format=",.0f")])
+                tooltip=["cg", tip_val, tip_itens])
                 .add_params(sel_cv))
             ev_cv = st.altair_chart(ch, width="stretch", on_select="rerun",
                                     key="anat_ch_cv")
             st.markdown("**Quanto tempo parado quando venceu**")
-            fg = vc.groupby("faixa_giro", as_index=False)["valor_total"].sum()
+            fg = (vc.groupby("faixa_giro", as_index=False)
+                  .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum")))
             ordem_g = [x[2] for x in core.FAIXAS_GIRO] + ["Sem cadastro"]
             sel_g = alt.selection_point(fields=["faixa_giro"], name="pgiro")
             ch2 = (alt.Chart(fg).mark_bar(color="#FB923C").encode(
-                x=alt.X("valor_total:Q", title="R$ vencido"),
+                x=alt.X(f"{mcol}:Q", title=mtitle),
                 y=alt.Y("faixa_giro:N", sort=ordem_g, title=None),
                 opacity=alt.condition(sel_g, alt.value(1.0), alt.value(0.35)),
-                tooltip=["faixa_giro", alt.Tooltip("valor_total:Q", format=",.0f")])
+                tooltip=["faixa_giro", tip_val, tip_itens])
                 .add_params(sel_g))
             ev_g = st.altair_chart(ch2, width="stretch", on_select="rerun",
                                    key="anat_ch_giro")
