@@ -5,6 +5,7 @@ _smoke.log
 _run.log
 # dados brutos (grandes / sensíveis) — ficam só na máquina
 DADOS*.xlsx
+BASE CADASTRO*.xlsx
 perdas*.xls
 perdas*.xlsx
 *Baixa*Estoque*.xls*

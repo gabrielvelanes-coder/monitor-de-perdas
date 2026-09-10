@@ -31,6 +31,12 @@ def _ascii(s) -> str:
     return re.sub(r"\s+", " ", s).strip().upper()
 
 
+def _norm_produto(s) -> str:
+    """Chave de join por descrição de produto: maiúsculas, espaços colapsados,
+    acento removido. Usada para casar o catálogo (nível produto) com a perda."""
+    return _ascii(s)
+
+
 # ----------------------------------------------------------------------------- #
 # 1. classificação de motivo
 # ----------------------------------------------------------------------------- #
@@ -247,12 +253,12 @@ def _read_xlsx(src) -> pd.DataFrame:
     return pd.read_excel(src)
 
 
-def _cache_path(paths: list[Path]) -> Path:
+def _cache_path(paths: list[Path], prefix: str = "cadastro") -> Path:
     key = "|".join(f"{p.name}:{p.stat().st_size}:{int(p.stat().st_mtime)}" for p in paths)
     h = hashlib.md5(key.encode()).hexdigest()[:12]
     d = paths[0].parent / ".cache"
     d.mkdir(exist_ok=True)
-    return d / f"cadastro_{h}.parquet"
+    return d / f"{prefix}_{h}.parquet"
 
 
 def load_cadastro(sources, use_cache: bool = True) -> pd.DataFrame:
@@ -295,6 +301,64 @@ def load_cadastro(sources, use_cache: bool = True) -> pd.DataFrame:
         except Exception:
             pass
     return cad.reset_index(drop=True)
+
+
+# catálogo nível-produto (BASE CADASTRO COM GRUPOS) — sem loja, chave = descrição
+_CAT_MAP = [
+    ("produto",          lambda n: n in ("DESCRICAO", "PRODUTO")),
+    ("cod_catalogo",     lambda n: n == "CODIGO"),
+    ("status_cadastro",  lambda n: n == "STATUS"),
+    ("classif_cat",      lambda n: n == "CLASSIFICACAO"),
+    ("curva_valor_cat",  lambda n: "CURVA VALOR" in n),
+    ("curva_qtd_cat",    lambda n: "CURVA QTD" in n),
+    ("principio_cat",    lambda n: "PRINCIPIO ATIVO" in n),
+    ("fabricante_cat",   lambda n: n == "FABRICANTE"),
+    ("natureza_receita", lambda n: "NATUREZA RECEITA" in n),
+]
+
+
+def load_catalogo(sources, use_cache: bool = True) -> pd.DataFrame:
+    """BASE CADASTRO COM GRUPOS: catálogo nível-produto (sem loja).
+       -> produto (chave normalizada), classif_cat, curva_valor_cat, curva_qtd_cat,
+          status_cadastro (Ativo/Inativo), principio_cat, fabricante_cat.
+       Só enriquece — a base operacional (giro/mvm/estoque) segue sendo o DADOS."""
+    are_paths = all(isinstance(s, (str, Path)) for s in sources)
+    if are_paths:
+        paths = [Path(s) for s in sources]
+        cp = _cache_path(paths, "catalogo")
+        if use_cache and cp.exists():
+            return pd.read_parquet(cp)
+
+    frames = []
+    for s in sources:
+        raw = _read_xlsx(s)
+        ren = {}
+        for c in raw.columns:
+            n = _ascii(c)
+            for dest, test in _CAT_MAP:
+                if dest not in ren.values() and test(n):
+                    ren[c] = dest
+                    break
+        raw = raw.rename(columns=ren)
+        keep = [c for c in raw.columns if c in {d for d, _ in _CAT_MAP}]
+        frames.append(raw[keep])
+
+    cat = pd.concat(frames, ignore_index=True)
+    if "produto" not in cat.columns:
+        raise ValueError(f"Catálogo sem coluna de descrição. Colunas: {list(cat.columns)}")
+    cat["produto"] = cat["produto"].map(_norm_produto)
+    cat = cat[cat["produto"].str.len() > 0]
+    # 1 linha por produto; Ativo vence Inativo (ordena antes de dropar duplicata)
+    if "status_cadastro" in cat.columns:
+        cat = cat.sort_values("status_cadastro", na_position="last")
+    cat = cat.drop_duplicates("produto", keep="first").reset_index(drop=True)
+
+    if are_paths and use_cache:
+        try:
+            cat.to_parquet(cp)
+        except Exception:
+            pass
+    return cat
 
 
 # ----------------------------------------------------------------------------- #
@@ -460,16 +524,45 @@ def _faixa(d):
     return "Sem cadastro"
 
 
+def _vazio(s: pd.Series) -> pd.Series:
+    """True onde o valor é NaN, '', 'nan' ou 'none' (texto sujo do Excel)."""
+    t = s.astype(str).str.strip().str.lower()
+    return s.isna() | t.isin(("", "nan", "none"))
+
+
+def _coalesce(a: pd.Series, b: pd.Series) -> pd.Series:
+    """a onde a tem valor; senão b."""
+    return a.where(~_vazio(a), b)
+
+
 def enriquecer_vencidos(perdas: pd.DataFrame, cad: pd.DataFrame,
-                        cats=("vencido",), incluir_dep: bool = False) -> pd.DataFrame:
+                        cats=("vencido",), incluir_dep: bool = False,
+                        catalogo: pd.DataFrame | None = None) -> pd.DataFrame:
     p = perdas[perdas["motivo_cat"].isin(cats)].copy()
     if not incluir_dep:
         p = p[~p["is_dep"]]
     m = p.merge(cad, on=["loja", "produto"], how="left", suffixes=("", "_cad"))
+    # 'sem cadastro' é sinal do DADOS (base operacional) — fixa antes de coalescer
+    m["sem_cadastro"] = m["curva_qtd"].isna() & m["mvm"].isna()
+
+    if catalogo is not None and not catalogo.empty:
+        cj = catalogo.rename(columns={"produto": "_pkey"})
+        m["_pkey"] = m["produto"].map(_norm_produto)
+        m = m.merge(cj, on="_pkey", how="left").drop(columns="_pkey")
+        if "classif_cat" in m.columns:
+            if "classif" not in m.columns:
+                m["classif"] = pd.NA
+            m["classif"] = _coalesce(m["classif"], m["classif_cat"])
+        if "curva_valor_cat" in m.columns:
+            m["curva_valor"] = _coalesce(m["curva_valor"], m["curva_valor_cat"])
+        if "curva_qtd_cat" in m.columns:
+            m["curva_qtd"] = _coalesce(m["curva_qtd"], m["curva_qtd_cat"])
+    if "status_cadastro" not in m.columns:
+        m["status_cadastro"] = pd.NA
+
     m["faixa_giro"] = m["ult_venda_dias"].map(_faixa)
     m["curva_valor"] = m["curva_valor"].fillna("sem cadastro")
     m["item_suspenso"] = m["motivo_susp"].notna() & (m["motivo_susp"].astype(str).str.strip() != "")
-    m["sem_cadastro"] = m["curva_qtd"].isna() & m["mvm"].isna()
     return m
 
 

@@ -60,14 +60,19 @@ def _cadastro(paths, sig):
     return core.load_cadastro(list(paths))
 
 
+@st.cache_data(show_spinner="Lendo catálogo (BASE CADASTRO COM GRUPOS)…")
+def _catalogo(paths, sig):
+    return core.load_catalogo(list(paths))
+
+
 @st.cache_data(show_spinner="Lendo faturamento…")
 def _fat_arquivo(path, mtime):
     return core.load_faturamento(path)
 
 
 @st.cache_data(show_spinner="Cruzando com o cadastro…")
-def _vclass(perdas_sig, cad_sig, cats, _perdas_df, _cad_df):
-    enr = core.enriquecer_vencidos(_perdas_df, _cad_df, tuple(cats))
+def _vclass(perdas_sig, cad_sig, cat_sig, cats, _perdas_df, _cad_df, _cat_df):
+    enr = core.enriquecer_vencidos(_perdas_df, _cad_df, tuple(cats), catalogo=_cat_df)
     return core.classificar_vencidos(enr)
 
 
@@ -90,6 +95,8 @@ def build_context() -> dict:
         up_p = st.file_uploader("Relatório de perdas (.xls/.xlsx)", type=["xls", "xlsx"])
         up_c = st.file_uploader("Cadastro — arquivos DADOS (.xlsx)", type=["xlsx"],
                                 accept_multiple_files=True)
+        up_cat = st.file_uploader("Catálogo — BASE CADASTRO COM GRUPOS (.xlsx)",
+                                  type=["xlsx"])
         up_f = st.file_uploader("Faturamento (.csv/.xlsx)", type=["csv", "xlsx"])
 
     # perdas (obrigatório)
@@ -112,6 +119,16 @@ def build_context() -> dict:
     elif auto_c:
         sig = tuple((Path(x).name, Path(x).stat().st_size) for x in auto_c)
         cad = _cadastro(tuple(auto_c), sig)
+
+    # catálogo nível-produto (opcional) — só enriquece classif/curva
+    auto_cat = _achar("BASE CADASTRO COM GRUPOS.xlsx", "*GRUPOS*.xlsx",
+                      "*cadastro*grupos*.xlsx")
+    catalogo = None
+    if up_cat is not None:
+        catalogo = core.load_catalogo([up_cat])
+    elif auto_cat:
+        csig_cat = tuple((Path(x).name, Path(x).stat().st_size) for x in auto_cat)
+        catalogo = _catalogo(tuple(auto_cat), csig_cat)
 
     # faturamento (opcional)
     auto_f = _achar("faturamento.csv", "faturamento.xlsx", "*faturamento*.csv")
@@ -160,21 +177,23 @@ def build_context() -> dict:
     cob = core.cobertura_faturamento(perdas_f, fat_f)
     n_meses_perda = max(perdas_f["ano_mes"].nunique(), 1)
 
-    psig = csig = None
+    psig = csig = catsig = None
     vclass = None
     if cad is not None:
         psig = (fonte, len(perdas))              # cache na base cheia; filtra depois
         csig = (len(cad), int(cad["produto"].nunique()))
-        vclass = _vclass(psig, csig, ("vencido",), perdas, cad)
+        catsig = (len(catalogo),) if catalogo is not None else None
+        vclass = _vclass(psig, csig, catsig, ("vencido",), perdas, cad, catalogo)
         if lojas_sel:
             vclass = vclass[vclass["loja"].isin(lojas_sel)]
         if meses_sel:
             vclass = vclass[vclass["ano_mes"].isin(meses_sel)]
 
-    return dict(perdas=perdas_f, perdas_full=perdas, cad=cad, fat=fat_f, fonte=fonte,
-                escopo=escopo, meta=meta, incluir_dep=incluir_dep, taxa_lm=taxa_lm,
-                mensal=mensal, cob=cob, vclass=vclass, n_meses=n_meses_perda,
-                lojas_sel=lojas_sel, meses_sel=meses_sel, psig=psig, csig=csig)
+    return dict(perdas=perdas_f, perdas_full=perdas, cad=cad, catalogo=catalogo,
+                fat=fat_f, fonte=fonte, escopo=escopo, meta=meta,
+                incluir_dep=incluir_dep, taxa_lm=taxa_lm, mensal=mensal, cob=cob,
+                vclass=vclass, n_meses=n_meses_perda, lojas_sel=lojas_sel,
+                meses_sel=meses_sel, psig=psig, csig=csig, catsig=catsig)
 
 
 def _editor_faturamento(perdas, fat):
@@ -267,7 +286,8 @@ MOTIVO_OPCOES = {
 def _vclass_recorte(cats):
     """vclass (enriquecido + classificado) para um conjunto de motivos, já
     aplicado o recorte global de loja/mês. Cacheado por motivo em `_vclass`."""
-    v = _vclass(CTX["psig"], CTX["csig"], tuple(cats), CTX["perdas_full"], CTX["cad"])
+    v = _vclass(CTX["psig"], CTX["csig"], CTX["catsig"], tuple(cats),
+                CTX["perdas_full"], CTX["cad"], CTX["catalogo"])
     if CTX["lojas_sel"]:
         v = v[v["loja"].isin(CTX["lojas_sel"])]
     if CTX["meses_sel"]:
@@ -667,6 +687,22 @@ def tela_anatomia():
     if lsel:
         vc = vc[vc["loja"].isin(lsel)]
 
+    # filtro por status no catálogo (só quando o catálogo está carregado)
+    tem_cat = CTX["catalogo"] is not None and "status_cadastro" in vc.columns
+    if tem_cat:
+        _s = vc["status_cadastro"].astype(str).str.strip().str.lower()
+        fora_cat = vc["status_cadastro"].isna() | _s.isin(["", "nan", "none"])
+        stat = st.radio("Status no catálogo",
+                        ["Todos", "Ativos", "Inativos", "Fora do catálogo"],
+                        horizontal=True, key="anat_status",
+                        help="Status do produto na BASE CADASTRO COM GRUPOS.")
+        if stat == "Ativos":
+            vc = vc[_s.eq("ativo")]
+        elif stat == "Inativos":
+            vc = vc[_s.eq("inativo")]
+        elif stat == "Fora do catálogo":
+            vc = vc[fora_cat]
+
     if vc.empty:
         st.info(f"Sem baixas de \"{mot_curto}\" nesse recorte.", icon=":material/info:")
         return
@@ -801,15 +837,17 @@ def tela_anatomia():
             st.markdown(f"**Produtos** — todos os itens de \"{mot_curto}\" no recorte")
             st.caption("Clique numa barra dos gráficos acima para filtrar aqui. "
                        "Clique nos cabeçalhos da tabela para ordenar.")
-        tab = (d.groupby("produto", as_index=False)
-               .agg(valor=("valor_total", "sum"), itens=("itens", "sum"),
-                    curva_valor=("curva_valor", "first"), curva_qtd=("curva_qtd", "first"),
-                    macro=("macro", "first"), cat=("cat1", "first"),
-                    faixa_giro=("faixa_giro", "first"),
-                    dias_sem_vender=("ult_venda_dias", "max"),
-                    n_lojas=("loja", "nunique"),
-                    lojas_ids=("loja", lambda s: ", ".join(
-                        str(int(x)) for x in sorted(s.dropna().unique()))))
+        agg = dict(valor=("valor_total", "sum"), itens=("itens", "sum"),
+                   curva_valor=("curva_valor", "first"), curva_qtd=("curva_qtd", "first"),
+                   macro=("macro", "first"), cat=("cat1", "first"),
+                   faixa_giro=("faixa_giro", "first"),
+                   dias_sem_vender=("ult_venda_dias", "max"),
+                   n_lojas=("loja", "nunique"),
+                   lojas_ids=("loja", lambda s: ", ".join(
+                       str(int(x)) for x in sorted(s.dropna().unique()))))
+        if tem_cat:
+            agg["status_cadastro"] = ("status_cadastro", "first")
+        tab = (d.groupby("produto", as_index=False).agg(**agg)
                .sort_values("valor", ascending=False).head(300))
         st.dataframe(tab, hide_index=True, width="stretch", height=360,
                      column_config={
@@ -821,7 +859,8 @@ def tela_anatomia():
                          "faixa_giro": "Tempo parado",
                          "dias_sem_vender": "Dias s/ vender",
                          "n_lojas": "Nº lojas",
-                         "lojas_ids": "Lojas (ID)"})
+                         "lojas_ids": "Lojas (ID)",
+                         "status_cadastro": "Status catálogo"})
         st.caption("As lojas são identificadas por número (2–25); não há nome de loja "
                    "no relatório de perdas. **Lojas (ID)** lista as lojas que "
                    f"baixaram o item por \"{mot_curto.lower()}\"; **Unidades** é a "
