@@ -2,10 +2,10 @@
 Monitor de Perdas — Grupo Velanes
 streamlit run app.py
 
-Cinco telas, cada uma responde uma pergunta:
-  1. Veredito .............. a perda é aceitável?
-  2. Motivos ............... o que é perda de verdade e o que não é? (de-para c/ o BI)
-  3. Anatomia da perda .... o que são esses itens? (medicamento? curva? giro?)
+Cinco telas (título = rótulo do menu), cada uma responde uma pergunta:
+  1. Painel ............... a perda é aceitável?
+  2. Motivos .............. o que é perda de verdade e o que não é? (de-para c/ o BI)
+  3. Anatomia da perda .... o que são esses itens? (medicamento? curva? giro? motivo?)
   4. Evitável x estrutural  estou dando perda em item que vende?
   5. Regras e simulação ... o que mudar e quanto economiza
 """
@@ -295,8 +295,8 @@ def _vclass_recorte(cats):
 def tela_veredito():
     st.title("Painel")
     esc, meta, incluir_dep = CTX["escopo"], CTX["meta"], CTX["incluir_dep"]
-    st.caption(f"Escopo: {core.ESCOPOS[esc]} · recorte global: {_recorte_txt()} · "
-               f"fonte `{CTX['fonte']}`")
+    st.caption(f"A perda é aceitável? · escopo: {core.ESCOPOS[esc]} · recorte global: "
+               f"{_recorte_txt()} · fonte `{CTX['fonte']}`")
 
     # ---- filtros da tela: mês e loja (dentro do recorte global) --------- #
     perdas, fat = CTX["perdas"], CTX["fat"]
@@ -510,7 +510,7 @@ def tela_veredito():
 # TELA 2 — MOTIVOS (de-para: o que é perda de verdade e o que não é)
 # =========================================================================== #
 def tela_motivos():
-    st.title("O que é o quê?")
+    st.title("Motivos")
     st.caption("Cada motivo de baixa de estoque: quanto pesa em R$ e em % do faturamento, "
                "e se é perda de verdade. É o de-para que explica a diferença entre a taxa "
                "da ferramenta (só vencidos) e o %perda/fat do Power BI (todos os motivos).")
@@ -653,16 +653,18 @@ def _cletra(s) -> str:
 
 
 def tela_anatomia():
-    st.title("O que são esses itens?")
+    st.title("Anatomia da perda")
     if _falta_cadastro():
         return
-    st.caption("Recorte (filtro global): " + _recorte_txt())
+    st.caption("O que são esses itens? · recorte (filtro global): " + _recorte_txt())
 
     # ---- motivo + filtros da tela (mês e loja, dentro do recorte global) --- #
     c_esc, c_mot, c_mes, c_loja = st.columns([1.1, 1.7, 1, 1])
     esc_a = c_esc.segmented_control(
-        "Motivos", ["Vencido", "Perda real", "Todos"], default="Vencido",
-        key="anat_escopo") or "Vencido"
+        "Motivos", ["Vencido", "Perda real", "Todos"], default="Todos",
+        key="anat_escopo",
+        help="Começa em Todos os motivos para você nunca perder uma linha. "
+             "Estreite para Vencido quando quiser só a anatomia do vencido.") or "Todos"
     esc_key = {"Vencido": "vencido", "Perda real": "perda_real", "Todos": "todos"}[esc_a]
     labels_all = [core.LABEL[k] for k in core.CATS if k != "ignorar"]
     mot_extra = c_mot.multiselect(
@@ -740,33 +742,51 @@ def tela_anatomia():
                    "Escolha \"Só sem classificação\" no seletor **Ver** para listá-los "
                    "na tabela do fim da página.")
 
-    # ---- por motivo no recorte (informação) ------------------------------ #
-    gmot = (vc.groupby("motivo_label", as_index=False)
+    # ---- TODOS os motivos do recorte (sempre visível, ignora escopo/status) --- #
+    vfull = _vclass_recorte(_cats_do_escopo("todos"))
+    if msel:
+        vfull = vfull[vfull["ano_mes"].isin(msel)]
+    if lsel:
+        vfull = vfull[vfull["loja"].isin(lsel)]
+    tot_full = vfull["valor_total"].sum() or 1.0
+    _inv = {v: k for k, v in core.LABEL.items()}
+    _cats_atuais = set(cats)
+    gmot = (vfull.groupby("motivo_label", as_index=False)
             .agg(valor=("valor_total", "sum"), unid=("itens", "sum"),
                  linhas=("valor_total", "size"), produtos=("produto", "nunique")))
-    gmot["pct"] = gmot["valor"] / tot
+    gmot["pct"] = gmot["valor"] / tot_full
+    gmot["no_escopo"] = gmot["motivo_label"].map(lambda l: _inv.get(l) in _cats_atuais)
     gmot = gmot.sort_values("valor", ascending=False).reset_index(drop=True)
-    with st.expander(f":material/category: Motivos no recorte ({len(gmot)}) — "
-                     f"{BRL(tot_real)} no total", expanded=len(gmot) > 1):
-        st.dataframe(
-            gmot, hide_index=True, width="stretch",
+    with st.container(border=True):
+        st.markdown(f"**Todos os motivos no recorte** — {len(gmot)} motivos · "
+                    f"{BRL(vfull['valor_total'].sum())} no total")
+        st.caption("Ignora o filtro de escopo/status acima — é a foto completa da "
+                   "loja/mês. **No escopo** = está entrando na análise abaixo.")
+        c_tb, c_gr = st.columns([3, 2])
+        c_tb.dataframe(
+            gmot[["motivo_label", "valor", "unid", "linhas", "produtos", "pct",
+                  "no_escopo"]],
+            hide_index=True, width="stretch",
             column_config={
                 "motivo_label": "Motivo",
                 "valor": st.column_config.NumberColumn("R$", format="R$ %.0f"),
                 "unid": st.column_config.NumberColumn("Unidades", format="%.0f"),
                 "linhas": "Linhas", "produtos": "Produtos",
-                "pct": st.column_config.NumberColumn("% do total", format="percent")})
-        if len(gmot) > 1:
-            ch_m = alt.Chart(gmot).mark_bar(color="#60A5FA").encode(
-                x=alt.X("valor:Q", title="R$"),
-                y=alt.Y("motivo_label:N", sort="-x", title=None),
-                tooltip=["motivo_label", alt.Tooltip("valor:Q", format=",.0f"),
-                         alt.Tooltip("unid:Q", format=",.0f")])
-            lbl_m = alt.Chart(gmot).mark_text(align="left", dx=4, color="#CBD5E1",
-                                              fontSize=11).encode(
-                x="valor:Q", y=alt.Y("motivo_label:N", sort="-x"),
-                text=alt.Text("valor:Q", format=",.0f"))
-            st.altair_chart(ch_m + lbl_m, width="stretch")
+                "pct": st.column_config.NumberColumn("% do total", format="percent"),
+                "no_escopo": st.column_config.CheckboxColumn("No escopo")})
+        ch_m = alt.Chart(gmot).mark_bar().encode(
+            x=alt.X("valor:Q", title="R$"),
+            y=alt.Y("motivo_label:N", sort="-x", title=None),
+            color=alt.Color("no_escopo:N", scale=alt.Scale(
+                domain=[True, False], range=["#60A5FA", "#475569"]),
+                legend=None),
+            tooltip=["motivo_label", alt.Tooltip("valor:Q", format=",.0f"),
+                     alt.Tooltip("unid:Q", format=",.0f")])
+        lbl_m = alt.Chart(gmot).mark_text(align="left", dx=4, color="#CBD5E1",
+                                          fontSize=11).encode(
+            x="valor:Q", y=alt.Y("motivo_label:N", sort="-x"),
+            text=alt.Text("valor:Q", format=",.0f"))
+        c_gr.altair_chart(ch_m + lbl_m, width="stretch")
 
     if "anat_nonce" not in st.session_state:
         st.session_state["anat_nonce"] = 0
@@ -927,10 +947,11 @@ def tela_anatomia():
 # TELA 4 — EVITÁVEL x ESTRUTURAL
 # =========================================================================== #
 def tela_baldes():
-    st.title("Estou dando perda em item que vende?")
+    st.title("Evitável x estrutural")
     if _falta_cadastro():
         return
-    st.caption("Recorte (filtro global): " + _recorte_txt())
+    st.caption("Estou dando perda em item que vende? · recorte (filtro global): "
+               + _recorte_txt())
     vc = CTX["vclass"]
     c_mes, c_loja = st.columns(2)
     msel = _mes_local(vc, "bald_meses", c_mes)
@@ -1003,10 +1024,11 @@ def tela_baldes():
 # TELA 5 — REGRAS E SIMULAÇÃO
 # =========================================================================== #
 def tela_regras():
-    st.title("O que mudar — e quanto economiza")
+    st.title("Regras e simulação")
     if _falta_cadastro():
         return
-    st.caption("Recorte (filtro global): " + _recorte_txt())
+    st.caption("O que mudar — e quanto economiza · recorte (filtro global): "
+               + _recorte_txt())
     vc = CTX["vclass"]
     c_mes, c_loja = st.columns(2)
     msel = _mes_local(vc, "reg_meses", c_mes)
