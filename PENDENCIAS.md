@@ -2,7 +2,19 @@
 
 ## PENDENTE
 
-### 0. Reestruturação combinada com o Gabriel (2026-09-10) — ✅ CONCLUÍDA (a–d)
+### 1. Faturamento de setembro/2026 — ÚNICA PENDÊNCIA ABERTA
+`faturamento.csv` vai até **2026-08**. Setembro ainda não fechou (dado de perda
+também é parcial). Quando fechar: pegar no Power BI *Visão geral - mês*, mês = set,
+a coluna **Receita** por **Und. ID** (22 lojas: 2–11, 13–20, 22–25; não há 12 nem 21),
+e acrescentar as linhas `loja,2026-09,valor` no `faturamento.csv`.
+Conferir sempre: soma das 22 lojas = Total exibido no rodapé do relatório.
+Agora dá para puxar isso pela extensão do Chrome (ver item 2).
+
+---
+
+## CONCLUÍDO NESTA SESSÃO (2026-09-10)
+
+### 0. Reestruturação combinada com o Gabriel — ✅ CONCLUÍDA (a–d)
 O Gabriel pediu para documentar e continuar depois. Sequência acordada (proposta
 minha, ele topou a direção geral; encadear na ordem, commit a cada etapa).
 Todos os quatro itens feitos nesta sessão + rodada de ajustes de filtro/tela.
@@ -33,20 +45,24 @@ Furto / Descontinuado / Perda real / Todos os motivos).
 após o merge do DADOS (DADOS tem prioridade; `sem_cadastro` fixado antes).
 `_vclass` recebe `cat_sig` + `_cat_df`. Anatomia ganhou radio "Status no
 catálogo" (Todos / Ativos / Inativos / Fora do catálogo) e coluna "Status
-catálogo". A `BASE CADASTRO COM EAN.xlsx` **não** entrou (perda não tem EAP).
+catálogo". A `BASE CADASTRO COM EAN.xlsx` **não** entrou (perda não tem EAN).
 Os 2 xlsx saíram do versionamento (`.gitignore`, dados sensíveis).
 
 Efeito real medido (vencido jan–set): "sem classificação" R$ 22.039 → **R$ 4.174**
 (residual "fora do catálogo"); os R$ 17.865 / 299 SKUs classificados foram para
 medicamento (219.827 → **231.003**) e não-medicamento (146.589 → **153.278**).
-Vencido de itens `Status = Inativo`: ~R$ 2,8 mil.
+Vencido de itens `Status = Inativo`: ~R$ 2,8 mil. Isso **fecha** a dúvida antiga
+"os R$ 22 mil sem classificação" (commit `46d77bf`).
 
-### 1. Faturamento de setembro/2026
-`faturamento.csv` vai até **2026-08**. Setembro ainda não fechou (dado de perda
-também é parcial). Quando fechar: pegar no Power BI *Visão geral - mês*, mês = set,
-a coluna **Receita** por **Und. ID** (22 lojas: 2–11, 13–20, 22–25; não há 12 nem 21),
-e acrescentar as linhas `loja,2026-09,valor` no `faturamento.csv`.
-Conferir sempre: soma das 22 lojas = Total exibido no rodapé do relatório.
+### Ajustes de leitura da Anatomia (feedback do Gabriel, commit `c5ecc70`)
+Cartão **"Total — <motivo>"** na linha de KPIs. Gráfico "Tem curva?" → **"Curva"**,
+estratificado por letra **A…I**. **Rótulo de valor em cada barra** dos 3 gráficos.
+Coluna "R$" da tabela → "Total perda (R$)".
+
+### Filtro clique-nos-gráficos da Anatomia — ✅ verificado no browser
+Era a dúvida "não está voltando". `selection_point(toggle="true")` (re-clique na
+mesma barra solta) + botão "Limpar filtros dos gráficos" (reset via nonce nas
+`key` dos charts). Testado no Chrome: OK.
 
 ### 2. Extensão Claude no Chrome — ✅ CONECTOU (2026-09-10, mais tarde)
 Voltou a conectar ("Browser 1", Windows local). Verificado no app rodando:
@@ -122,9 +138,8 @@ Feedback do Gabriel: além do filtro global, quer seletor de loja/mês nas telas
   no seletor *Ver*. Tabela: coluna `lojas` (nunique) virou **Nº lojas** +
   **Lojas (ID)** (lista dos números); `itens` → "Unidades vencidas". Não há nome
   de loja no relatório de perdas, só número (2–25).
-- **A verificar com o Gabriel no app:** o clique-para-filtrar da Anatomia (se o
-  problema era "não limpa", o `toggle="true"` resolve; se era "não filtra nada",
-  precisa de teste no navegador — a extensão Chrome não conecta nesta máquina).
+- (O clique-para-filtrar da Anatomia foi ajustado depois com `toggle="true"` +
+  botão de limpar, e verificado no browser — ver seção CONCLUÍDO acima.)
 
 ### Commit `55eb5d6` — Veredito vira "Painel" (item 0b)
 - `st.Page` renomeado Veredito → **Painel**. Topo com 4 KPIs: Faturamento no
@@ -274,8 +289,18 @@ explícita. Hoje já dá para ver na barra lateral: **Parâmetros → Escopo →
 
 ---
 
-## Estado do app
+## Estado do app (fim da sessão 2026-09-10)
+- **5 telas** via `st.navigation`: Painel · Motivos · Anatomia da perda ·
+  Evitável x estrutural · Regras e simulação.
+- **Filtros:** global na sidebar (Lojas + Período) + `Meses/Lojas (nesta tela)`
+  em todas as telas. Parâmetros: Escopo, Meta (default 0,40 %), Incluir DEP.
+- **Entradas:** `perdas*.xls` (obrigatório) · `DADOS*.xlsx` (cadastro por loja) ·
+  `BASE CADASTRO COM GRUPOS.xlsx` (catálogo, só enriquece) · `faturamento.csv`
+  (jan–ago/2026). Os 4 auto-detectados na pasta; todos com uploader na sidebar.
+  `BASE CADASTRO COM EAN.xlsx` não é usada. Os 2 xlsx de catálogo estão fora do
+  git (`.gitignore`).
 - Roda em `http://localhost:8501` (headless, `--server.fileWatcherType none` →
   mudança de código só entra com restart do servidor).
 - Comando: `streamlit run app.py --server.port 8501 --server.headless true --server.fileWatcherType none`
 - Python: `C:\Users\E.C Velanes\AppData\Local\Programs\Python\Python314\python.exe`
+- Doc de uso e visão geral: `README.md`.
