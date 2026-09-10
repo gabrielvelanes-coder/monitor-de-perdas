@@ -38,6 +38,24 @@ BRL = lambda v: ("R$ " + f"{v:,.0f}").replace(",", ".") if pd.notna(v) else "—
 PCT = lambda v: f"{v*100:,.2f}%".replace(".", ",") if pd.notna(v) else "—"
 
 
+def _heat(vals, base=(214, 40, 40)):
+    """Escala de cor sem matplotlib. vals: Series ou DataFrame numérico."""
+    arr = vals.to_numpy(dtype="float64")
+    mn, mx = pd.Series(arr.ravel()).min(), pd.Series(arr.ravel()).max()
+    rng = (mx - mn) or 1.0
+    r, g, b = base
+
+    def css(x):
+        if pd.isna(x):
+            return ""
+        a = 0.06 + 0.55 * (x - mn) / rng
+        return f"background-color: rgba({r},{g},{b},{a:.2f})"
+
+    if getattr(vals, "ndim", 1) == 2:
+        return vals.map(css)
+    return [css(x) for x in arr]
+
+
 # --------------------------------------------------------------------------- #
 # cargas com cache
 # --------------------------------------------------------------------------- #
@@ -192,11 +210,11 @@ with tab_geral:
         st.caption(f"Projeção anualizada da perda ({core.ESCOPOS[escopo].lower()}): "
                    f"**{BRL(proj)}**  ·  base: {len(mensal)} mês(es) com faturamento.")
 
-        st.subheader("Taxa de perdas por mês")
+        st.subheader("Taxa de perdas por mês (% do faturamento)")
         ch = mensal.copy()
-        ch["Meta"] = meta
-        ch = ch.set_index("ano_mes")[["taxa", "Meta"]].rename(columns={"taxa": "Taxa"})
-        st.line_chart(ch, height=280)
+        ch["Taxa (%)"] = ch["taxa"] * 100
+        ch["Meta (%)"] = meta * 100
+        st.line_chart(ch.set_index("ano_mes")[["Taxa (%)", "Meta (%)"]], height=280)
 
         st.subheader("Valor da perda por mês (R$)")
         st.bar_chart(mensal.set_index("ano_mes")["perda"], height=240)
@@ -293,14 +311,14 @@ with tab_lojas:
                                "faturamento": "Faturamento", "taxa": "Taxa",
                                "meses": "Meses"})
               .style.format({"Perda": BRL, "Faturamento": BRL, "Taxa": PCT})
-              .background_gradient(subset=["Taxa"], cmap="Reds"),
+              .apply(lambda s: _heat(s), subset=["Taxa"]),
             use_container_width=True, hide_index=True, height=430)
 
         st.subheader("Mapa de calor — taxa por loja × mês")
         piv = (taxa_lm.dropna(subset=["faturamento"])
                .assign(loja=lambda d: d["loja"].astype(int))
                .pivot_table(index="loja", columns="ano_mes", values="taxa"))
-        st.dataframe(piv.style.format(PCT).background_gradient(cmap="Reds", axis=None),
+        st.dataframe(piv.style.format(PCT).apply(_heat, axis=None),
                      use_container_width=True)
     else:
         st.info("Informe o faturamento para ranquear as lojas por taxa.")

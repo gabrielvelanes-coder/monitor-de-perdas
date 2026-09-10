@@ -295,12 +295,36 @@ def _to_ano_mes(v, ano_fallback=None) -> str | None:
         return None
 
 
+def _parse_num(x) -> float | None:
+    """Converte valor monetário em float, tolerando formato BR (1.234,56),
+    US (1,234.56), 'R$', e número já limpo (1234.56)."""
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return None
+    if isinstance(x, (int, float)):
+        return float(x)
+    s = re.sub(r"[^\d,.\-]", "", str(x).strip())
+    if not s or s in ("-", ".", ","):
+        return None
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):            # 1.234,56  -> BR
+            s = s.replace(".", "").replace(",", ".")
+        else:                                      # 1,234.56  -> US
+            s = s.replace(",", "")
+    elif "," in s:                                 # só vírgula
+        s = s.replace(",", ".") if len(s.rsplit(",", 1)[-1]) <= 2 else s.replace(",", "")
+    # só ponto (ou nada): ponto = decimal
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
 def load_faturamento(src, ano_fallback: int | None = None) -> pd.DataFrame:
     """Aceita formato LONGO (loja, mês, faturamento) ou LARGO (loja nas linhas,
        meses nas colunas). -> loja, ano_mes, faturamento"""
     name = getattr(src, "name", str(src))
     if name.lower().endswith((".csv", ".txt")):
-        df = pd.read_csv(src, sep=None, engine="python", decimal=",", thousands=".")
+        df = pd.read_csv(src, sep=None, engine="python", dtype=str)
     else:
         df = pd.read_excel(src)
     df.columns = [str(c).strip() for c in df.columns]
@@ -334,11 +358,15 @@ def load_faturamento(src, ano_fallback: int | None = None) -> pd.DataFrame:
         out.columns = ["loja", "ano_mes", "faturamento"]
         out["ano_mes"] = out["ano_mes"].map(lambda v: _to_ano_mes(v, ano_fallback))
 
-    out["loja"] = pd.to_numeric(out["loja"], errors="coerce")
-    out["faturamento"] = pd.to_numeric(
-        out["faturamento"].astype(str).str.replace(r"[R$\s]", "", regex=True)
-        .str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
-        errors="coerce")
+    def _loja(v):
+        n = pd.to_numeric(v, errors="coerce")
+        if pd.notna(n):
+            return float(n)
+        m = re.search(r"\d+", str(v))
+        return float(m.group()) if m else None
+
+    out["loja"] = out["loja"].map(_loja)
+    out["faturamento"] = out["faturamento"].map(_parse_num)
     out = out.dropna(subset=["loja", "ano_mes", "faturamento"])
     out = out[out["faturamento"] > 0]
     return out.groupby(["loja", "ano_mes"], as_index=False)["faturamento"].sum()
