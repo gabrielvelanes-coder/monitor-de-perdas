@@ -4,6 +4,15 @@ Dashboard para acompanhar a **taxa de perdas por mês** (perda ÷ faturamento),
 separar o que é perda de verdade do que não é, e diagnosticar de onde vem o
 vencimento cruzando com curva / giro / estoque.
 
+## As 4 telas
+
+| Tela | Pergunta que responde |
+|---|---|
+| **Veredito** | A perda é aceitável? Semáforo taxa vs faixa de mercado + diagnóstico automático + quanto é recuperável. |
+| **Anatomia da perda** | O que são esses itens? Medicamento × não-medicamento (pela sua árvore mercadológica), por categoria, por curva, por tempo parado ao vencer. |
+| **Evitável × estrutural** | Estou dando perda em item que vende? 4 baldes — PDV / excesso de compra / item suspenso / fora do mix — com ação por item e ranking de lojas. |
+| **Regras e simulação** | O que mudar e quanto economiza. Simula teto de estoque por curva/categoria e estima a economia/mês. |
+
 ## Por que existe
 
 Numa reunião foi apresentada uma taxa de perdas que parecia alta demais.
@@ -55,12 +64,11 @@ loja,ano_mes,faturamento
 ```
 
 Também aceita formato largo (lojas nas linhas, meses `2026-01`, `jan`... nas colunas).
-Baixe `faturamento_modelo.csv` na aba **Dados**. A origem é o Power BI
-*Visão geral - mês* → coluna **Receita** por **Und. ID**, um mês fechado por vez
-(ou o mesmo dado direto do ERP).
+A origem é o Power BI *Visão geral - mês* → coluna **Receita** por **Und. ID**,
+um mês fechado por vez (ou trimestre em *Visão geral - trimestre*, ou o ERP).
+O `faturamento.csv` que acompanha traz jan–jun/2026 (T1+T2 do Power BI); falta jul em diante.
 
-Dá pra digitar na barra lateral (**✏️ digitar faturamento na mão**); fica salvo
-em `faturamento.json`.
+Dá pra digitar na barra lateral (**Digitar faturamento**); fica salvo em `faturamento.json`.
 
 ## Escopos de perda
 
@@ -78,5 +86,9 @@ em `faturamento.json`.
   a classificação de motivos é feita por trecho sem acento, então funciona
   mesmo assim.
 - Lojas que aparecem na perda mas não no faturamento (ex.: 12, 21, DEP) são
-  listadas na Visão geral e ficam fora do cálculo de %.
-- `core.py` = carga + cálculo (funções puras). `app.py` = interface.
+  listadas no Veredito e ficam fora do cálculo de %.
+- Medicamento × não-medicamento sai do nível 1 da árvore mercadológica
+  (`Classificação Principal` do cadastro): PROPAGADO/GENÉRICOS/SIMILARES = medicamento;
+  DERMO/SUPLEMENTOS/HIGIENE/INFANTIL... = não. ~6% fica "sem classificação".
+- Tema: `.streamlit/config.toml` (financial-dashboard, dark).
+- `core.py` = carga + cálculo (funções puras). `app.py` = 4 telas via `st.navigation`.

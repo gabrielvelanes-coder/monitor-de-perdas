@@ -457,3 +457,161 @@ def cobertura_faturamento(perdas: pd.DataFrame, fat: pd.DataFrame) -> dict:
         "meses_sem_faturamento": sorted(meses_perda - meses_fat),
         "meses_com_faturamento": sorted(meses_perda & meses_fat),
     }
+
+
+# ----------------------------------------------------------------------------- #
+# 6. anatomia dos vencidos: medicamento x não, categoria, curva, diagnóstico
+# ----------------------------------------------------------------------------- #
+
+# nível 1 da árvore mercadológica -> medicamento sim/não (a árvore do cliente)
+_N1_MEDICAMENTO = {
+    "PROPAGADO", "GENERICOS", "GENERICO", "SIMILARES", "SIMILAR", "ETICOS",
+    "ETICO", "ETICOS/MIP", "OTC", "MIP", "OTC/MIP", "CONTROLADOS", "CONTROLADO",
+    "MEDICAMENTOS", "PERFUMARIA ETICA", "GENERICOS E SIMILARES",
+}
+_N1_NAO_MED = {
+    "DERMOCOSMETICOS", "SUPLEMENTOS", "CUIDADOS COM A PELE", "MUNDO INFANTIL",
+    "HIGIENE INTIMA", "HIGIENE", "HIGIENE E BELEZA", "CABELO", "BELEZA",
+    "CONVENIENCIA", "PERFUMARIA", "CUIDADOS COM A SAUDE", "MAKE", "NUTRICAO",
+    "DIETETICOS", "BEM ESTAR", "CUIDADOS PESSOAIS", "PRIMEIROS SOCORROS",
+    "ORTOPEDIA", "NUTRICAO E DIETETICOS", "SAUDE E BEM ESTAR",
+}
+
+
+def _arvore_niveis(classif) -> tuple[str, str]:
+    """('PROPAGADO', 'PBM - RX') a partir de 'ARVORE NOVA > PROPAGADO > PBM - RX'."""
+    s = str(classif or "").replace(">", "|")
+    partes = [p.strip() for p in s.split("|") if p.strip()]
+    partes = [p for p in partes if _ascii(p) not in ("ARVORE NOVA", "ARVORE", "NAN", "NONE", "")]
+    n1 = partes[0].upper() if partes else ""
+    n2 = partes[1].upper() if len(partes) > 1 else ""
+    return n1, n2
+
+
+def macro_categoria(classif) -> str:
+    n1, n2 = _arvore_niveis(classif)
+    a1 = _ascii(n1)
+    if not a1:
+        return "sem classificacao"
+    if a1 in _N1_MEDICAMENTO:
+        return "medicamento"
+    if a1 in _N1_NAO_MED:
+        return "nao-medicamento"
+    # fallback pelo nível 2
+    a2 = _ascii(n2)
+    if any(k in a2 for k in ("CONTROLADO", "RX", "USO CONTINUO", "ANTIMICROBIANO",
+                             "INJETAVEL", "PBM", "GLP1", "OTC", "MIP")):
+        return "medicamento"
+    if any(k in a2 for k in ("PELE", "CABELO", "SOLAR", "SUPLEMENT", "INFANTIL",
+                             "HIGIENE", "MAQUIAGEM", "PERFUME")):
+        return "nao-medicamento"
+    return "indefinido"
+
+
+# baldes de diagnóstico: onde a perda foi decidida
+BALDES = {
+    "pdv":          ("Evitável no PDV (item que gira venceu na gôndola)",
+                     "Reforçar rotina de validade / PVPS na loja."),
+    "compra":       ("Excesso de compra / giro fraco",
+                     "Rever parâmetro de compra e estoque mínimo; não repor."),
+    "cadastro":     ("Item suspenso / descontinuado",
+                     "Bloquear compra, devolver ao fornecedor ou rebaixar antes de vencer."),
+    "sem_cadastro": ("Fora do mix atual (sem cadastro ativo)",
+                     "Apurar origem; provável encalhe antigo ou transferência de sobra."),
+}
+
+
+def classificar_vencidos(enr: pd.DataFrame) -> pd.DataFrame:
+    """Adiciona: macro (medicamento x não), cat1/cat2 da árvore, balde, evitavel_pdv."""
+    m = enr.copy()
+    niveis = m["classif"].map(_arvore_niveis)
+    m["cat1"] = niveis.map(lambda t: t[0] or "Sem categoria")
+    m["cat2"] = niveis.map(lambda t: t[1] or "—")
+    m["macro"] = m["classif"].map(macro_categoria)
+
+    mvm = pd.to_numeric(m.get("mvm"), errors="coerce").fillna(0)
+    ult = pd.to_numeric(m.get("ult_venda_dias"), errors="coerce")
+    curva = m["curva_valor"].astype(str).str.upper()
+    susp = m["item_suspenso"].fillna(False)
+    semc = m["sem_cadastro"].fillna(False)
+
+    vivo = (mvm > 0) & (ult <= 90)
+    curva_rel = curva.isin(list("ABCDE"))
+
+    def balde(i):
+        if semc.iloc[i]:
+            return "sem_cadastro"
+        if susp.iloc[i]:
+            return "cadastro"
+        if vivo.iloc[i] and curva_rel.iloc[i]:
+            return "pdv"
+        return "compra"
+
+    m["balde"] = [balde(i) for i in range(len(m))]
+    m["balde_label"] = m["balde"].map(lambda b: BALDES[b][0])
+    m["evitavel_pdv"] = (curva.isin(list("ABCD"))) & (mvm > 0) & (ult <= 90)
+    return m
+
+
+def resumo_baldes(vclass: pd.DataFrame, n_meses: int = 1) -> pd.DataFrame:
+    tot = vclass["valor_total"].sum() or 1.0
+    g = (vclass.groupby(["balde", "balde_label"], as_index=False)
+         .agg(valor=("valor_total", "sum"), linhas=("valor_total", "size"),
+              produtos=("produto", "nunique")))
+    g["valor_mes"] = g["valor"] / max(n_meses, 1)
+    g["pct"] = g["valor"] / tot
+    g["acao"] = g["balde"].map(lambda b: BALDES[b][1])
+    ordem = {"pdv": 0, "compra": 1, "cadastro": 2, "sem_cadastro": 3}
+    return g.sort_values("balde", key=lambda s: s.map(ordem)).reset_index(drop=True)
+
+
+def frase_diagnostico(mensal: pd.DataFrame, vclass: pd.DataFrame,
+                      escopo: str, meta: float = 0.005,
+                      faixa=(0.003, 0.008)) -> tuple[str, str]:
+    """(nivel, frase). nivel ∈ {ok, atencao, critico}."""
+    if mensal.empty:
+        return "sem_dados", "Informe o faturamento para avaliar a taxa."
+    taxa = mensal["taxa"].mean()
+    lo, hi = faixa
+    if taxa <= hi * 0.85:          # folga: ~0,68% ainda é "ok"
+        nivel = "ok"
+    elif taxa <= hi:
+        nivel = "atencao"
+    else:
+        nivel = "critico"
+
+    tot = vclass["valor_total"].sum() or 1.0
+    pct_med = vclass.loc[vclass.macro == "medicamento", "valor_total"].sum() / tot
+    pct_pdv = vclass.loc[vclass.balde == "pdv", "valor_total"].sum() / tot
+    top_cat = (vclass.groupby("cat1")["valor_total"].sum().sort_values(ascending=False))
+    cat_nome = top_cat.index[0] if len(top_cat) else "—"
+    cat_pct = (top_cat.iloc[0] / tot) if len(top_cat) else 0
+
+    faixa_txt = {"ok": "dentro da faixa normal de varejo farma (0,3%–0,8%)",
+                 "atencao": "no limite superior da faixa de mercado (0,3%–0,8%)",
+                 "critico": "acima da faixa normal de varejo farma (0,3%–0,8%)"}[nivel]
+    return nivel, (
+        f"Taxa média de {taxa*100:.2f}% do faturamento — {faixa_txt}. "
+        f"{pct_med*100:.0f}% da perda é medicamento e {cat_pct*100:.0f}% vem de "
+        f"{cat_nome.title()}. Apenas {pct_pdv*100:.0f}% é item com giro que venceu na "
+        f"gôndola — a alavanca está na compra e no cadastro, não na disciplina de loja."
+    )
+
+
+def simular_teto(vclass: pd.DataFrame, curvas=("H", "I"), macro=None,
+                 reducao: float = 0.7, n_meses: int = 6) -> dict:
+    """Economia estimada se a compra de itens curva X (macro Y) fosse limitada.
+    Assume que `reducao` do valor que hoje cai no balde 'compra' desse recorte é evitável."""
+    d = vclass[vclass["balde"] == "compra"].copy()
+    d = d[d["curva_valor"].astype(str).str.upper().isin([c.upper() for c in curvas])]
+    if macro:
+        d = d[d["macro"] == macro]
+    base = d["valor_total"].sum()
+    economia_periodo = base * reducao
+    return {
+        "base_periodo": base,
+        "economia_periodo": economia_periodo,
+        "economia_mes": economia_periodo / max(n_meses, 1),
+        "produtos": int(d["produto"].nunique()),
+        "linhas": int(len(d)),
+    }

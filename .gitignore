@@ -11,3 +11,6 @@ faturamento.csv
 faturamento.xlsx
 faturamento.json
 *.parquet
+
+
+!.streamlit/config.toml

@@ -1,77 +1,61 @@
 """
 Monitor de Perdas — Grupo Velanes
-Roda com:  streamlit run app.py
-Coloque na mesma pasta:
-  - o relatório "perdas ... com motivo e loja.xls"
-  - os arquivos "DADOS ... .xlsx" (cadastro / curva)
-  - opcional: faturamento.csv  (loja, ano_mes, faturamento)
+streamlit run app.py
+
+Quatro telas, cada uma responde uma pergunta:
+  1. Veredito .............. a perda é aceitável?
+  2. Anatomia da perda .... o que são esses itens? (medicamento? curva? giro?)
+  3. Evitável x estrutural  estou dando perda em item que vende?
+  4. Regras e simulação ... o que mudar e quanto economiza
 """
 from __future__ import annotations
 
 import glob
-import io
 import json
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
 import core
 
-st.set_page_config(page_title="Monitor de Perdas — Velanes", page_icon="📉",
-                   layout="wide")
+st.set_page_config(page_title="Monitor de Perdas — Velanes",
+                   page_icon=":material/monitoring:", layout="wide")
 
 PASTA = Path(__file__).parent
-FAT_JSON = PASTA / "faturamento.json"        # faturamento digitado no app
-
-# faturamento por loja do mês corrente parcial, lido do Power BI em 10/09/2026.
-# serve só de semente pro editor manual; substitua por meses fechados.
-SEMENTE_FAT_2026_09 = {
-    2: 132256.54, 3: 232022.80, 4: 186729.42, 5: 107834.15, 6: 78809.50,
-    7: 247201.02, 8: 140906.51, 9: 119715.23, 10: 151162.72, 11: 215229.61,
-    13: 164402.50, 14: 65152.23, 15: 99762.66, 16: 109869.50, 17: 71411.23,
-    18: 172464.33, 19: 89586.07, 20: 123729.84, 22: 66101.00, 23: 90241.39,
-    24: 90882.24, 25: 94779.54,
-}
+FAT_JSON = PASTA / "faturamento.json"
 
 BRL = lambda v: ("R$ " + f"{v:,.0f}").replace(",", ".") if pd.notna(v) else "—"
-PCT = lambda v: f"{v*100:,.2f}%".replace(".", ",") if pd.notna(v) else "—"
+BRLk = lambda v: ("R$ " + f"{v/1000:,.1f}k").replace(",", "X").replace(".", ",").replace("X", ".") if pd.notna(v) else "—"
+PCT = lambda v, d=2: f"{v*100:,.{d}f}%".replace(".", ",") if pd.notna(v) else "—"
 
-
-def _heat(vals, base=(214, 40, 40)):
-    """Escala de cor sem matplotlib. vals: Series ou DataFrame numérico."""
-    arr = vals.to_numpy(dtype="float64")
-    mn, mx = pd.Series(arr.ravel()).min(), pd.Series(arr.ravel()).max()
-    rng = (mx - mn) or 1.0
-    r, g, b = base
-
-    def css(x):
-        if pd.isna(x):
-            return ""
-        a = 0.06 + 0.55 * (x - mn) / rng
-        return f"background-color: rgba({r},{g},{b},{a:.2f})"
-
-    if getattr(vals, "ndim", 1) == 2:
-        return vals.map(css)
-    return [css(x) for x in arr]
+COR = {"ok": "#34D399", "atencao": "#FBBF24", "critico": "#F87171", "sem_dados": "#94A3B8"}
+COR_BALDE = {"pdv": "#34D399", "compra": "#FB923C", "cadastro": "#F87171", "sem_cadastro": "#94A3B8"}
 
 
 # --------------------------------------------------------------------------- #
-# cargas com cache
+# cargas (cache)
 # --------------------------------------------------------------------------- #
-@st.cache_data(show_spinner="Lendo relatório de perdas...")
+@st.cache_data(show_spinner="Lendo relatório de perdas…")
 def _perdas(path, mtime):
     return core.load_perdas(path)
 
 
-@st.cache_data(show_spinner="Lendo cadastro (pode demorar na 1ª vez)...")
+@st.cache_data(show_spinner="Lendo cadastro (1ª vez demora)…")
 def _cadastro(paths, sig):
     return core.load_cadastro(list(paths))
 
 
-@st.cache_data(show_spinner="Lendo faturamento...")
+@st.cache_data(show_spinner="Lendo faturamento…")
 def _fat_arquivo(path, mtime):
     return core.load_faturamento(path)
+
+
+@st.cache_data(show_spinner="Cruzando vencidos com o cadastro…")
+def _vclass(perdas_sig, cad_sig, _perdas_df, _cad_df):
+    enr = core.enriquecer_vencidos(_perdas_df, _cad_df, ("vencido",))
+    return core.classificar_vencidos(enr)
 
 
 def _achar(*padroes):
@@ -83,357 +67,422 @@ def _achar(*padroes):
 
 
 # --------------------------------------------------------------------------- #
-# SIDEBAR — entradas
+# contexto: roda a cada rerun, monta sidebar e carrega tudo
 # --------------------------------------------------------------------------- #
-st.sidebar.title("📉 Monitor de Perdas")
-st.sidebar.caption("Grupo Velanes")
+def build_context() -> dict:
+    st.sidebar.markdown("### :material/monitoring: Monitor de Perdas")
+    st.sidebar.caption("Grupo Velanes")
 
-# --- relatório de perdas ---
-st.sidebar.subheader("1. Relatório de perdas")
-up_perdas = st.sidebar.file_uploader("Análise de Baixa de Estoque (.xls/.xlsx)",
-                                     type=["xls", "xlsx"])
-auto_perdas = _achar("perdas*.xls", "perdas*.xlsx", "*Baixa*Estoque*.xls*")
-if up_perdas is not None:
-    perdas = core.load_perdas(up_perdas)
-    fonte_perdas = up_perdas.name
-elif auto_perdas:
-    p = auto_perdas[0]
-    perdas = _perdas(p, Path(p).stat().st_mtime)
-    fonte_perdas = Path(p).name
-    st.sidebar.caption(f"📄 auto: `{fonte_perdas}`")
-else:
-    st.info("👈 Envie o relatório de perdas para começar.")
-    st.stop()
+    with st.sidebar.expander("Fontes de dados", icon=":material/folder:", expanded=False):
+        up_p = st.file_uploader("Relatório de perdas (.xls/.xlsx)", type=["xls", "xlsx"])
+        up_c = st.file_uploader("Cadastro — arquivos DADOS (.xlsx)", type=["xlsx"],
+                                accept_multiple_files=True)
+        up_f = st.file_uploader("Faturamento (.csv/.xlsx)", type=["csv", "xlsx"])
 
-# --- cadastro ---
-st.sidebar.subheader("2. Cadastro (curva / giro)")
-up_cad = st.sidebar.file_uploader("Arquivos DADOS (.xlsx)", type=["xlsx"],
-                                  accept_multiple_files=True)
-auto_cad = _achar("DADOS*.xlsx", "*cadastro*.xlsx")
-cad = None
-if up_cad:
-    cad = core.load_cadastro(up_cad)
-    st.sidebar.caption(f"{len(up_cad)} arquivo(s) enviados")
-elif auto_cad:
-    sig = tuple((Path(x).name, Path(x).stat().st_size) for x in auto_cad)
-    cad = _cadastro(tuple(auto_cad), sig)
-    st.sidebar.caption(f"📄 auto: {len(auto_cad)} arquivo(s) DADOS")
-else:
-    st.sidebar.caption("sem cadastro → aba de diagnóstico fica limitada")
-
-# --- faturamento ---
-st.sidebar.subheader("3. Faturamento por loja / mês")
-up_fat = st.sidebar.file_uploader("faturamento (.csv/.xlsx)", type=["csv", "xlsx"])
-auto_fat = _achar("faturamento.csv", "faturamento.xlsx", "*faturamento*.csv")
-
-fat = pd.DataFrame(columns=["loja", "ano_mes", "faturamento"])
-origem_fat = "nenhuma"
-if up_fat is not None:
-    fat = core.load_faturamento(up_fat)
-    origem_fat = f"arquivo enviado ({up_fat.name})"
-elif auto_fat:
-    fat = _fat_arquivo(auto_fat[0], Path(auto_fat[0]).stat().st_mtime)
-    origem_fat = f"arquivo `{Path(auto_fat[0]).name}`"
-elif FAT_JSON.exists():
-    j = json.loads(FAT_JSON.read_text(encoding="utf-8"))
-    fat = pd.DataFrame(j)
-    origem_fat = "digitado no app (faturamento.json)"
-
-st.sidebar.caption(f"faturamento: {origem_fat}")
-
-with st.sidebar.expander("✏️ digitar faturamento na mão"):
-    st.caption("Formato longo: uma linha por loja e mês. "
-               "Exporte do Power BI (Receita por Und. ID) e cole aqui.")
-    meses_perda = sorted(perdas["ano_mes"].unique())
-    lojas_perda = sorted(int(x) for x in perdas.loc[~perdas["is_dep"], "loja"].dropna().unique())
-    if fat.empty:
-        base = pd.DataFrame(
-            [(l, meses_perda[-1] if meses_perda else "2026-09",
-              SEMENTE_FAT_2026_09.get(l, 0.0)) for l in lojas_perda],
-            columns=["loja", "ano_mes", "faturamento"])
+    # perdas (obrigatório)
+    auto_p = _achar("perdas*.xls", "perdas*.xlsx", "*Baixa*Estoque*.xls*")
+    if up_p is not None:
+        perdas, fonte = core.load_perdas(up_p), up_p.name
+    elif auto_p:
+        perdas = _perdas(auto_p[0], Path(auto_p[0]).stat().st_mtime)
+        fonte = Path(auto_p[0]).name
     else:
-        base = fat.copy()
-    ed = st.data_editor(base, num_rows="dynamic", use_container_width=True,
-                        key="fat_editor")
-    if st.button("💾 salvar faturamento digitado"):
-        clean = ed.dropna(subset=["loja", "ano_mes", "faturamento"])
-        clean = clean[clean["faturamento"] > 0]
-        FAT_JSON.write_text(clean.to_json(orient="records"), encoding="utf-8")
-        st.success("Salvo. Recarregue a página (R).")
+        st.error("Coloque o relatório de perdas na pasta ou envie na barra lateral.",
+                 icon=":material/upload_file:")
+        st.stop()
 
-# --- parâmetros ---
-st.sidebar.subheader("Parâmetros")
-escopo = st.sidebar.radio("Escopo da perda", list(core.ESCOPOS),
-                          format_func=lambda k: core.ESCOPOS[k])
-meta = st.sidebar.number_input("Meta / alerta (% do faturamento)",
-                               value=0.50, step=0.05, format="%.2f") / 100
-incluir_dep = st.sidebar.checkbox("Incluir depósito (DEP)", value=False)
+    # cadastro (opcional)
+    auto_c = _achar("DADOS*.xlsx", "*cadastro*.xlsx")
+    cad = None
+    if up_c:
+        cad = core.load_cadastro(up_c)
+    elif auto_c:
+        sig = tuple((Path(x).name, Path(x).stat().st_size) for x in auto_c)
+        cad = _cadastro(tuple(auto_c), sig)
 
-# --------------------------------------------------------------------------- #
-# cálculo
-# --------------------------------------------------------------------------- #
-taxa_lm = core.taxa_por_loja_mes(perdas, fat, escopo, incluir_dep)
-mensal = core.resumo_mensal(taxa_lm)
-cob = core.cobertura_faturamento(perdas, fat)
+    # faturamento (opcional)
+    auto_f = _achar("faturamento.csv", "faturamento.xlsx", "*faturamento*.csv")
+    fat = pd.DataFrame(columns=["loja", "ano_mes", "faturamento"])
+    if up_f is not None:
+        fat = core.load_faturamento(up_f)
+    elif auto_f:
+        fat = _fat_arquivo(auto_f[0], Path(auto_f[0]).stat().st_mtime)
+    elif FAT_JSON.exists():
+        fat = pd.DataFrame(json.loads(FAT_JSON.read_text(encoding="utf-8")))
 
-st.title("Monitor de Perdas")
-st.caption(f"Fonte: `{fonte_perdas}` · escopo: **{core.ESCOPOS[escopo]}** · "
-           f"{'com' if incluir_dep else 'sem'} depósito")
+    # parâmetros
+    st.sidebar.markdown("### Parâmetros")
+    escopo = st.sidebar.segmented_control(
+        "Escopo", list(core.ESCOPOS), format_func=lambda k: core.ESCOPOS[k].split(" (")[0],
+        default="vencido", selection_mode="single") or "vencido"
+    meta = st.sidebar.slider("Meta (% do faturamento)", 0.1, 1.5, 0.5, 0.05,
+                             format="%.2f%%") / 100
+    incluir_dep = st.sidebar.toggle("Incluir depósito (DEP)", value=False)
 
-if fat.empty:
-    st.warning("⚠️ Sem faturamento informado ainda — os percentuais não são "
-               "calculados. Envie um arquivo ou digite na barra lateral. "
-               "Enquanto isso, as abas mostram os valores em R$.")
+    with st.sidebar.expander("Digitar faturamento", icon=":material/edit:"):
+        _editor_faturamento(perdas, fat)
 
-tab_geral, tab_motivo, tab_lojas, tab_venc, tab_dados = st.tabs(
-    ["📊 Visão geral", "🔻 Por motivo", "🏪 Lojas",
-     "📅 Vencidos — diagnóstico", "⬇️ Dados"])
+    # derivados
+    taxa_lm = core.taxa_por_loja_mes(perdas, fat, escopo, incluir_dep)
+    mensal = core.resumo_mensal(taxa_lm)
+    cob = core.cobertura_faturamento(perdas, fat)
+    n_meses_perda = perdas["ano_mes"].nunique()
 
-# =========================================================================== #
-# ABA 1 — VISÃO GERAL
-# =========================================================================== #
-with tab_geral:
-    if not mensal.empty:
-        ult = mensal.iloc[-1]
-        prev = mensal.iloc[-2] if len(mensal) > 1 else None
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric(f"Taxa de perdas — {ult['ano_mes']}", PCT(ult["taxa"]),
-                  delta=(PCT(ult["taxa"] - prev["taxa"]) if prev is not None else None),
-                  delta_color="inverse")
-        c2.metric("Perda no mês", BRL(ult["perda"]))
-        c3.metric("Faturamento no mês", BRL(ult["faturamento"]))
-        media = mensal["taxa"].mean()
-        c4.metric("Média do período", PCT(media),
-                  delta=f"meta {PCT(meta)}", delta_color="off")
+    vclass = None
+    if cad is not None:
+        psig = (fonte, len(perdas))
+        csig = (len(cad), int(cad["produto"].nunique()))
+        vclass = _vclass(psig, csig, perdas, cad)
 
-        proj = mensal["perda"].mean() * 12
-        st.caption(f"Projeção anualizada da perda ({core.ESCOPOS[escopo].lower()}): "
-                   f"**{BRL(proj)}**  ·  base: {len(mensal)} mês(es) com faturamento.")
+    return dict(perdas=perdas, cad=cad, fat=fat, fonte=fonte, escopo=escopo,
+                meta=meta, incluir_dep=incluir_dep, taxa_lm=taxa_lm, mensal=mensal,
+                cob=cob, vclass=vclass, n_meses=n_meses_perda)
 
-        st.subheader("Taxa de perdas por mês (% do faturamento)")
-        ch = mensal.copy()
-        ch["Taxa (%)"] = ch["taxa"] * 100
-        ch["Meta (%)"] = meta * 100
-        st.line_chart(ch.set_index("ano_mes")[["Taxa (%)", "Meta (%)"]], height=280)
 
-        st.subheader("Valor da perda por mês (R$)")
-        st.bar_chart(mensal.set_index("ano_mes")["perda"], height=240)
-    else:
-        st.info("Informe o faturamento para ver a evolução da taxa.")
-        mm = (perdas[perdas["motivo_cat"].map(lambda c: core.in_escopo(c, escopo))]
-              .groupby("ano_mes")["valor_total"].sum())
-        st.subheader("Valor da perda por mês (R$) — sem % ainda")
-        st.bar_chart(mm, height=260)
-
-    st.divider()
-    st.subheader("🔎 Bater com o número da reunião")
-    cc1, cc2 = st.columns(2)
-    val_reuniao = cc1.number_input("Valor apresentado (R$/mês)", value=0.0, step=1000.0)
-    pct_reuniao = cc2.number_input("Ou % apresentado", value=0.0, step=0.1) / 100
-    if not mensal.empty:
-        real_val = mensal["perda"].mean()
-        real_pct = mensal["taxa"].mean()
-        linhas = []
-        if val_reuniao:
-            linhas.append(f"- Valor: reunião **{BRL(val_reuniao)}** vs dados "
-                          f"**{BRL(real_val)}**  → diferença **{BRL(val_reuniao-real_val)}** "
-                          f"({(val_reuniao/real_val-1)*100:+.0f}%)")
-        if pct_reuniao:
-            linhas.append(f"- Percentual: reunião **{PCT(pct_reuniao)}** vs dados "
-                          f"**{PCT(real_pct)}**  → **{(pct_reuniao-real_pct)*100:+.2f} p.p.**")
-        if linhas:
-            st.markdown("\n".join(linhas))
-        with st.expander("valores de referência (todos os recortes, média mensal do período)"):
-            ref = []
-            for e in core.ESCOPOS:
-                t = core.resumo_mensal(core.taxa_por_loja_mes(perdas, fat, e, incluir_dep))
-                if not t.empty:
-                    ref.append({"recorte": core.ESCOPOS[e],
-                                "R$/mês": t["perda"].mean(),
-                                "% faturamento": t["taxa"].mean()})
-            if ref:
-                rd = pd.DataFrame(ref)
-                st.dataframe(rd.style.format({"R$/mês": BRL, "% faturamento": PCT}),
-                             use_container_width=True, hide_index=True)
-
-    if cob["meses_sem_faturamento"]:
-        st.caption("Meses sem faturamento informado (fora do cálculo de %): "
-                   + ", ".join(cob["meses_sem_faturamento"]))
-    if cob["lojas_sem_faturamento"]:
-        st.caption("Lojas com perda mas sem faturamento informado: "
-                   + ", ".join(str(int(x)) for x in cob["lojas_sem_faturamento"]))
-
-# =========================================================================== #
-# ABA 2 — POR MOTIVO
-# =========================================================================== #
-with tab_motivo:
-    meses_op = ["(todos)"] + sorted(perdas["ano_mes"].unique())
-    sel = st.multiselect("Meses", meses_op, default=["(todos)"])
-    meses = None if "(todos)" in sel or not sel else sel
-    pm = core.perda_por_motivo(perdas, incluir_dep, meses)
-
-    tot = pm["valor"].sum()
-    real = pm.loc[pm["is_perda_real"], "valor"].sum()
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Baixa total no período", BRL(tot))
-    c2.metric("Perda real", BRL(real), delta=f"{real/tot*100:.0f}% do total",
-              delta_color="off")
-    c3.metric("Não é perda (mkt, consumo, reembolso...)", BRL(tot - real),
-              delta=f"{(tot-real)/tot*100:.0f}% do total", delta_color="off")
-
-    disp = pm[["motivo_label", "is_perda_real", "valor", "valor_mes", "pct",
-               "itens", "linhas"]].rename(columns={
-        "motivo_label": "Motivo", "is_perda_real": "Perda real?",
-        "valor": "Valor total", "valor_mes": "Valor / mês",
-        "pct": "% do total", "itens": "Itens", "linhas": "Lançamentos"})
-    st.dataframe(disp.style.format({"Valor total": BRL, "Valor / mês": BRL,
-                                    "% do total": PCT}),
-                 use_container_width=True, hide_index=True)
-    st.bar_chart(pm.set_index("motivo_label")["valor"], height=320,
-                 horizontal=True)
-
-# =========================================================================== #
-# ABA 3 — LOJAS
-# =========================================================================== #
-with tab_lojas:
-    if taxa_lm["faturamento"].notna().any():
-        base = taxa_lm.dropna(subset=["faturamento"])
-        rk = (base.groupby("loja", as_index=False)
-              .agg(perda=("perda", "sum"), faturamento=("faturamento", "sum"),
-                   meses=("ano_mes", "nunique")))
-        rk["taxa"] = rk["perda"] / rk["faturamento"]
-        rk = rk.sort_values("taxa", ascending=False)
-        rk["loja"] = rk["loja"].astype(int)
-
-        st.subheader("Ranking de lojas pela taxa de perdas")
-        st.dataframe(
-            rk.rename(columns={"loja": "Loja", "perda": "Perda",
-                               "faturamento": "Faturamento", "taxa": "Taxa",
-                               "meses": "Meses"})
-              .style.format({"Perda": BRL, "Faturamento": BRL, "Taxa": PCT})
-              .apply(lambda s: _heat(s), subset=["Taxa"]),
-            use_container_width=True, hide_index=True, height=430)
-
-        st.subheader("Mapa de calor — taxa por loja × mês")
-        piv = (taxa_lm.dropna(subset=["faturamento"])
-               .assign(loja=lambda d: d["loja"].astype(int))
-               .pivot_table(index="loja", columns="ano_mes", values="taxa"))
-        st.dataframe(piv.style.format(PCT).apply(_heat, axis=None),
-                     use_container_width=True)
-    else:
-        st.info("Informe o faturamento para ranquear as lojas por taxa.")
-        rk = (perdas[~perdas["is_dep"] if not incluir_dep else slice(None)]
-              .pipe(lambda d: d[d["motivo_cat"].map(lambda c: core.in_escopo(c, escopo))])
-              .groupby("loja", as_index=False)["valor_total"].sum()
-              .sort_values("valor_total", ascending=False))
-        rk["loja"] = rk["loja"].astype("Int64")
-        st.dataframe(rk.rename(columns={"loja": "Loja", "valor_total": "Perda R$"})
-                     .style.format({"Perda R$": BRL}),
-                     use_container_width=True, hide_index=True)
-
-# =========================================================================== #
-# ABA 4 — VENCIDOS: DIAGNÓSTICO
-# =========================================================================== #
-with tab_venc:
-    if cad is None:
-        st.info("Envie os arquivos DADOS (cadastro) para cruzar os vencidos "
-                "com curva, giro e estoque.")
-    else:
-        cats = ("vencido",) if escopo == "vencido" else tuple(
-            c for c in core.CATS if core.IS_PERDA_REAL[c])
-        enr = core.enriquecer_vencidos(perdas, cad, cats, incluir_dep)
-
-        f1, f2, f3 = st.columns(3)
-        lojas = sorted(int(x) for x in enr["loja"].dropna().unique())
-        fl = f1.multiselect("Loja", lojas, default=[])
-        meses_v = sorted(enr["ano_mes"].unique())
-        fm = f2.multiselect("Mês", meses_v, default=[])
-        curvas = sorted(enr["curva_valor"].dropna().unique())
-        fc = f3.multiselect("Curva (valor)", curvas, default=[])
-        v = enr.copy()
-        if fl:
-            v = v[v["loja"].isin(fl)]
-        if fm:
-            v = v[v["ano_mes"].isin(fm)]
-        if fc:
-            v = v[v["curva_valor"].isin(fc)]
-
-        tot_v = v["valor_total"].sum()
-        semcad = v.loc[v["sem_cadastro"], "valor_total"].sum()
-        susp = v.loc[v["item_suspenso"], "valor_total"].sum()
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Valor vencido (filtro)", BRL(tot_v))
-        c2.metric("Curva I", PCT(v.loc[v["curva_valor"] == "I", "valor_total"].sum() / tot_v)
-                  if tot_v else "—")
-        c3.metric("Item já suspenso no cadastro", BRL(susp),
-                  delta=f"{susp/tot_v*100:.0f}%" if tot_v else None, delta_color="off")
-        c4.metric("Sem vender há +180 dias",
-                  PCT(v.loc[v["ult_venda_dias"] > 180, "valor_total"].sum() / tot_v)
-                  if tot_v else "—")
-
-        cA, cB = st.columns(2)
-        with cA:
-            st.subheader("Por curva de valor")
-            gc = (v.groupby("curva_valor", as_index=False)["valor_total"].sum()
-                  .sort_values("valor_total", ascending=False))
-            st.bar_chart(gc.set_index("curva_valor")["valor_total"], height=280)
-        with cB:
-            st.subheader("Por tempo sem vender")
-            ordem = [x[2] for x in core.FAIXAS_GIRO] + ["Sem cadastro"]
-            gg = (v.groupby("faixa_giro", as_index=False)["valor_total"].sum())
-            gg["faixa_giro"] = pd.Categorical(gg["faixa_giro"], ordem, ordered=True)
-            st.bar_chart(gg.sort_values("faixa_giro").set_index("faixa_giro")["valor_total"],
-                         height=280)
-
-        st.subheader("Top produtos vencidos")
-        top = (v.groupby("produto", as_index=False)
-               .agg(valor=("valor_total", "sum"), itens=("itens", "sum"),
-                    curva=("curva_valor", "first"),
-                    ult_venda=("ult_venda_dias", "max"),
-                    lojas=("loja", "nunique"),
-                    suspenso=("item_suspenso", "any"),
-                    classif=("classif", "first"))
-               .sort_values("valor", ascending=False).head(40))
-        st.dataframe(
-            top.rename(columns={"produto": "Produto", "valor": "Valor",
-                                "itens": "Itens", "curva": "Curva",
-                                "ult_venda": "Dias s/ vender", "lojas": "Nº lojas",
-                                "suspenso": "Suspenso?", "classif": "Classificação"})
-               .style.format({"Valor": BRL}),
-            use_container_width=True, hide_index=True, height=430)
-
-        st.download_button(
-            "⬇️ baixar vencidos cruzados (CSV)",
-            v.to_csv(index=False).encode("utf-8-sig"),
-            file_name="vencidos_cruzados.csv", mime="text/csv")
-
-# =========================================================================== #
-# ABA 5 — DADOS
-# =========================================================================== #
-with tab_dados:
-    st.subheader("Taxa por loja × mês")
-    st.dataframe(taxa_lm, use_container_width=True, height=300)
-    st.download_button("⬇️ taxa_loja_mes.csv",
-                       taxa_lm.to_csv(index=False).encode("utf-8-sig"),
-                       "taxa_loja_mes.csv", "text/csv")
-
-    st.subheader("Resumo mensal")
-    st.dataframe(mensal, use_container_width=True)
-
-    st.subheader("Perdas (linha a linha, tratado)")
-    st.dataframe(perdas.head(2000), use_container_width=True, height=300)
-    st.download_button("⬇️ perdas_tratado.csv",
-                       perdas.to_csv(index=False).encode("utf-8-sig"),
-                       "perdas_tratado.csv", "text/csv")
-
-    st.divider()
-    st.subheader("Modelo de faturamento")
-    st.caption("Baixe, preencha com os meses fechados (Power BI → Receita por "
-               "Und. ID, um mês por vez) e envie na barra lateral.")
-    modelo = pd.DataFrame(
-        [(l, "2026-01", "") for l in
-         sorted(int(x) for x in perdas.loc[~perdas["is_dep"], "loja"].dropna().unique())],
+def _editor_faturamento(perdas, fat):
+    st.caption("Uma linha por loja e mês. Fonte: Power BI → Receita por Und. ID.")
+    lojas = sorted(int(x) for x in perdas.loc[~perdas["is_dep"], "loja"].dropna().unique())
+    meses = sorted(perdas["ano_mes"].unique())
+    base = fat.copy() if not fat.empty else pd.DataFrame(
+        [(l, meses[-1] if meses else "2026-01", 0.0) for l in lojas],
         columns=["loja", "ano_mes", "faturamento"])
-    st.download_button("⬇️ faturamento_modelo.csv",
-                       modelo.to_csv(index=False).encode("utf-8-sig"),
-                       "faturamento_modelo.csv", "text/csv")
+    ed = st.data_editor(base, num_rows="dynamic", width="stretch", key="fat_ed")
+    if st.button("Salvar", icon=":material/save:"):
+        c = ed.dropna(subset=["loja", "ano_mes", "faturamento"])
+        c = c[c["faturamento"] > 0]
+        FAT_JSON.write_text(c.to_json(orient="records"), encoding="utf-8")
+        st.toast("Faturamento salvo. Recarregue (R).", icon=":material/check:")
+
+
+CTX = build_context()
+
+
+# --------------------------------------------------------------------------- #
+# helpers de UI
+# --------------------------------------------------------------------------- #
+def _sem_faturamento_aviso():
+    if CTX["fat"].empty:
+        st.warning("Sem faturamento informado — os percentuais não são calculados. "
+                   "Envie um arquivo ou digite na barra lateral.",
+                   icon=":material/warning:")
+        return True
+    return False
+
+
+def _falta_cadastro():
+    if CTX["vclass"] is None:
+        st.info("Envie os arquivos **DADOS** (cadastro) na barra lateral para esta análise.",
+                icon=":material/dataset:")
+        return True
+    return False
+
+
+# =========================================================================== #
+# TELA 1 — VEREDITO
+# =========================================================================== #
+def tela_veredito():
+    st.title("A perda é aceitável?")
+    m, esc = CTX["mensal"], CTX["escopo"]
+    st.caption(f"Escopo: {core.ESCOPOS[esc]} · fonte `{CTX['fonte']}`")
+
+    if m.empty:
+        _sem_faturamento_aviso()
+        mm = (CTX["perdas"][CTX["perdas"]["motivo_cat"].map(lambda c: core.in_escopo(c, esc))]
+              .groupby("ano_mes")["valor_total"].sum().reset_index())
+        st.subheader("Valor da perda por mês")
+        st.bar_chart(mm, x="ano_mes", y="valor_total", height=260)
+        return
+
+    nivel, frase = ("sem_dados", "")
+    if CTX["vclass"] is not None:
+        nivel, frase = core.frase_diagnostico(m, CTX["vclass"], esc, CTX["meta"])
+    taxa = m["taxa"].mean()
+    ult = m.iloc[-1]
+    recuperavel = 0.0
+    if CTX["vclass"] is not None:
+        rb = core.resumo_baldes(CTX["vclass"], CTX["n_meses"])
+        recuperavel = rb.loc[rb["balde"].isin(["compra", "cadastro"]), "valor_mes"].sum()
+
+    with st.container(border=True):
+        c1, c2 = st.columns([1, 2], vertical_alignment="center")
+        with c1:
+            rot = {"ok": "ACEITÁVEL", "atencao": "ATENÇÃO", "critico": "CRÍTICO",
+                   "sem_dados": "—"}[nivel]
+            st.markdown(
+                f"<div style='font-size:0.8rem;color:#94A3B8;text-transform:uppercase;"
+                f"letter-spacing:.08em'>Taxa média do período</div>"
+                f"<div style='font-size:3rem;font-weight:700;line-height:1.1'>{PCT(taxa)}</div>"
+                f"<div style='display:inline-block;margin-top:.4rem;padding:.15rem .6rem;"
+                f"border-radius:999px;background:{COR[nivel]}22;color:{COR[nivel]};"
+                f"font-weight:600;font-size:.85rem'>{rot}</div>",
+                unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"**Diagnóstico.** {frase}" if frase else
+                        "Envie o cadastro (DADOS) para o diagnóstico automático.")
+
+    with st.container(horizontal=True):
+        st.metric("Taxa no mês", PCT(ult["taxa"]),
+                  delta=PCT(ult["taxa"] - m.iloc[-2]["taxa"]) if len(m) > 1 else None,
+                  delta_color="inverse", border=True,
+                  chart_data=(m["taxa"] * 100).tolist(), chart_type="line")
+        st.metric("Perda no mês", BRL(ult["perda"]), border=True)
+        st.metric("Faturamento no mês", BRL(ult["faturamento"]), border=True)
+        st.metric("Recuperável / mês", BRL(recuperavel), border=True,
+                  help="Valor médio nos baldes 'excesso de compra' e 'item suspenso' — "
+                       "atacável por política de compra e cadastro, não por disciplina de loja.")
+
+    left, right = st.columns([3, 2])
+    with left:
+        with st.container(border=True):
+            st.markdown("**Taxa de perdas por mês** (% do faturamento)")
+            d = m[["ano_mes", "taxa"]].copy()
+            d["taxa"] *= 100
+            d["meta"] = CTX["meta"] * 100
+            base = alt.Chart(d).encode(x=alt.X("ano_mes:N", title=None))
+            linha = base.mark_line(point=True, strokeWidth=2, color=COR["atencao"]).encode(
+                y=alt.Y("taxa:Q", title="%"),
+                tooltip=["ano_mes", alt.Tooltip("taxa:Q", format=".2f")])
+            meta_l = base.mark_rule(strokeDash=[4, 4], color="#94A3B8").encode(y="meta:Q")
+            st.altair_chart(linha + meta_l, width="stretch")
+    with right:
+        with st.container(border=True):
+            st.markdown("**Bater com o número da reunião**")
+            v = st.number_input("Valor apresentado (R$/mês)", value=0.0, step=1000.0)
+            pp = st.number_input("ou % apresentado", value=0.0, step=0.1) / 100
+            if v:
+                st.write(f"Dados: **{BRL(m['perda'].mean())}/mês** · diferença "
+                         f"**{BRL(v - m['perda'].mean())}** ({(v/m['perda'].mean()-1)*100:+.0f}%)")
+            if pp:
+                st.write(f"Dados: **{PCT(taxa)}** · diferença **{(pp-taxa)*100:+.2f} p.p.**")
+
+    cob = CTX["cob"]
+    if cob["meses_sem_faturamento"] or cob["lojas_sem_faturamento"]:
+        avisos = []
+        if cob["meses_sem_faturamento"]:
+            avisos.append("meses sem faturamento: " + ", ".join(cob["meses_sem_faturamento"]))
+        if cob["lojas_sem_faturamento"]:
+            avisos.append("lojas sem faturamento: " +
+                          ", ".join(str(int(x)) for x in cob["lojas_sem_faturamento"]))
+        st.caption(" · ".join(avisos) + " — ficam fora do cálculo de %.")
+
+
+# =========================================================================== #
+# TELA 2 — ANATOMIA DA PERDA
+# =========================================================================== #
+def tela_anatomia():
+    st.title("O que são esses itens?")
+    if _falta_cadastro():
+        return
+    vc = CTX["vclass"].copy()
+    meses = sorted(vc["ano_mes"].unique())
+    sel = st.multiselect("Meses", meses, default=meses, placeholder="todos os meses")
+    if sel:
+        vc = vc[vc["ano_mes"].isin(sel)]
+    tot = vc["valor_total"].sum() or 1.0
+
+    macro = vc.groupby("macro", as_index=False)["valor_total"].sum().sort_values("valor_total", ascending=False)
+    macro["pct"] = macro["valor_total"] / tot
+    with st.container(horizontal=True):
+        for _, r in macro.iterrows():
+            st.metric(r["macro"].capitalize(), BRL(r["valor_total"]),
+                      delta=f"{r['pct']*100:.0f}% do vencido", delta_color="off", border=True)
+
+    left, right = st.columns(2)
+    with left:
+        with st.container(border=True):
+            st.markdown("**Por categoria da árvore mercadológica**")
+            gsel = st.segmented_control("Ver", ["Todas", "Só medicamento", "Só não-medicamento"],
+                                        default="Todas", label_visibility="collapsed")
+            d = vc
+            if gsel == "Só medicamento":
+                d = vc[vc["macro"] == "medicamento"]
+            elif gsel == "Só não-medicamento":
+                d = vc[vc["macro"] == "nao-medicamento"]
+            cat = (d.groupby("cat1", as_index=False)["valor_total"].sum()
+                   .sort_values("valor_total", ascending=False).head(12))
+            ch = alt.Chart(cat).mark_bar(color="#60A5FA").encode(
+                x=alt.X("valor_total:Q", title="R$ vencido"),
+                y=alt.Y("cat1:N", sort="-x", title=None),
+                tooltip=["cat1", alt.Tooltip("valor_total:Q", format=",.0f")])
+            st.altair_chart(ch, width="stretch")
+    with right:
+        with st.container(border=True):
+            st.markdown("**Tem curva? (curva de valor)**")
+            cv = vc.copy()
+            cv["cg"] = cv["curva_valor"].astype(str).str.upper().map(
+                lambda x: "A–D (relevante)" if x in list("ABCD")
+                else ("E–G (média)" if x in list("EFG")
+                      else ("H–I (cauda)" if x in list("HI") else "Sem cadastro")))
+            g = cv.groupby("cg", as_index=False)["valor_total"].sum()
+            ordem = ["A–D (relevante)", "E–G (média)", "H–I (cauda)", "Sem cadastro"]
+            ch = alt.Chart(g).mark_bar().encode(
+                x=alt.X("valor_total:Q", title="R$ vencido"),
+                y=alt.Y("cg:N", sort=ordem, title=None),
+                color=alt.Color("cg:N", scale=alt.Scale(
+                    domain=ordem, range=["#34D399", "#FBBF24", "#F87171", "#94A3B8"]),
+                    legend=None),
+                tooltip=["cg", alt.Tooltip("valor_total:Q", format=",.0f")])
+            st.altair_chart(ch, width="stretch")
+            st.markdown("**Quanto tempo parado quando venceu**")
+            fg = (vc.groupby("faixa_giro", as_index=False)["valor_total"].sum())
+            ordem_g = [x[2] for x in core.FAIXAS_GIRO] + ["Sem cadastro"]
+            ch2 = alt.Chart(fg).mark_bar(color="#FB923C").encode(
+                x=alt.X("valor_total:Q", title="R$ vencido"),
+                y=alt.Y("faixa_giro:N", sort=ordem_g, title=None),
+                tooltip=["faixa_giro", alt.Tooltip("valor_total:Q", format=",.0f")])
+            st.altair_chart(ch2, width="stretch")
+
+    with st.container(border=True):
+        st.markdown("**Produtos** (clique nos cabeçalhos para ordenar)")
+        cat_pick = st.selectbox("Filtrar categoria", ["(todas)"] +
+                                sorted(vc["cat1"].unique()))
+        d = vc if cat_pick == "(todas)" else vc[vc["cat1"] == cat_pick]
+        tab = (d.groupby("produto", as_index=False)
+               .agg(valor=("valor_total", "sum"), itens=("itens", "sum"),
+                    curva=("curva_valor", "first"), macro=("macro", "first"),
+                    cat=("cat1", "first"), dias_sem_vender=("ult_venda_dias", "max"),
+                    lojas=("loja", "nunique"))
+               .sort_values("valor", ascending=False).head(300))
+        st.dataframe(tab, hide_index=True, width="stretch", height=360,
+                     column_config={"valor": st.column_config.NumberColumn("R$ vencido", format="R$ %.0f")})
+
+
+# =========================================================================== #
+# TELA 3 — EVITÁVEL x ESTRUTURAL
+# =========================================================================== #
+def tela_baldes():
+    st.title("Estou dando perda em item que vende?")
+    if _falta_cadastro():
+        return
+    vc = CTX["vclass"]
+    nm = CTX["n_meses"]
+    rb = core.resumo_baldes(vc, nm)
+    tot_mes = rb["valor_mes"].sum()
+
+    st.caption("Cada real de vencido classificado por **onde a perda foi decidida**.")
+    with st.container(horizontal=True):
+        for _, r in rb.iterrows():
+            st.metric(r["balde_label"].split(" (")[0], BRL(r["valor_mes"]) + " /mês",
+                      delta=f"{r['pct']*100:.0f}% do vencido", delta_color="off",
+                      border=True, help=r["acao"])
+
+    left, right = st.columns([2, 3])
+    with left:
+        with st.container(border=True):
+            st.markdown("**Composição**")
+            d = rb.copy()
+            d["k"] = d["balde_label"].str.split(" \\(").str[0]
+            ch = alt.Chart(d).mark_bar().encode(
+                x=alt.X("valor:Q", stack="normalize", title="% do vencido", axis=alt.Axis(format="%")),
+                y=alt.Y("k:N", sort=list(d["k"]), title=None),
+                color=alt.Color("balde:N", scale=alt.Scale(
+                    domain=list(COR_BALDE), range=list(COR_BALDE.values())), legend=None),
+                tooltip=["balde_label", alt.Tooltip("valor:Q", format=",.0f")])
+            st.altair_chart(ch, width="stretch")
+    with right:
+        with st.container(border=True):
+            st.markdown("**Lojas — perda por balde** (R$ no período)")
+            gl = (vc.groupby(["loja", "balde"], as_index=False)["valor_total"].sum())
+            gl["loja"] = gl["loja"].astype("Int64").astype(str)
+            ordem_loja = (gl.groupby("loja")["valor_total"].sum()
+                          .sort_values(ascending=False).index.tolist())
+            ch = alt.Chart(gl).mark_bar().encode(
+                x=alt.X("valor_total:Q", title="R$ vencido"),
+                y=alt.Y("loja:N", sort=ordem_loja, title="Loja"),
+                color=alt.Color("balde:N", scale=alt.Scale(
+                    domain=list(COR_BALDE), range=list(COR_BALDE.values())),
+                    legend=alt.Legend(orient="bottom", title=None)),
+                tooltip=["loja", "balde", alt.Tooltip("valor_total:Q", format=",.0f")])
+            st.altair_chart(ch, width="stretch")
+
+    st.markdown("### Detalhe por balde")
+    for _, r in rb.iterrows():
+        with st.expander(f"{r['balde_label']} — {BRL(r['valor'])}  ·  {r['produtos']} produtos",
+                         icon=":material/list:"):
+            st.caption(f":material/bolt: **Ação:** {r['acao']}")
+            d = vc[vc["balde"] == r["balde"]]
+            tab = (d.groupby("produto", as_index=False)
+                   .agg(valor=("valor_total", "sum"), curva=("curva_valor", "first"),
+                        macro=("macro", "first"), dias_sem_vender=("ult_venda_dias", "max"),
+                        lojas=("loja", "nunique"))
+                   .sort_values("valor", ascending=False).head(80))
+            st.dataframe(tab, hide_index=True, width="stretch", height=280,
+                         column_config={"valor": st.column_config.NumberColumn("R$", format="R$ %.0f")})
+
+
+# =========================================================================== #
+# TELA 4 — REGRAS E SIMULAÇÃO
+# =========================================================================== #
+def tela_regras():
+    st.title("O que mudar — e quanto economiza")
+    if _falta_cadastro():
+        return
+    vc = CTX["vclass"]
+    nm = CTX["n_meses"]
+
+    st.markdown(
+        "A perda é **cauda longa** (milhares de SKUs, cada um pouco), então não adianta "
+        "lista de 30 itens — tem que ser **regra**. Simule abaixo o efeito de limitar a "
+        "compra/estoque de um recorte.")
+
+    with st.container(border=True):
+        c1, c2, c3 = st.columns(3)
+        curvas = c1.segmented_control("Curvas alvo", ["H e I", "F a I", "E a I"],
+                                      default="H e I")
+        mp = {"H e I": ("H", "I"), "F a I": ("F", "G", "H", "I"),
+              "E a I": ("E", "F", "G", "H", "I")}[curvas]
+        macro = c2.selectbox("Categoria", ["todas", "medicamento", "nao-medicamento"])
+        red = c3.slider("% do excesso que dá pra evitar", 30, 90, 70, 5) / 100
+        sim = core.simular_teto(vc, curvas=mp, macro=None if macro == "todas" else macro,
+                                reducao=red, n_meses=nm)
+
+        a, b, c = st.columns(3)
+        a.metric("Economia estimada", BRL(sim["economia_mes"]) + " /mês", border=True)
+        b.metric("No período analisado", BRL(sim["economia_periodo"]), border=True)
+        c.metric("SKUs afetados pela regra", f"{sim['produtos']:,}".replace(",", "."),
+                 border=True)
+        st.caption(
+            f"Base: R$ {sim['base_periodo']:,.0f} de vencido caiu no balde "
+            f"'excesso de compra' nesse recorte no período. A regra assume que "
+            f"{red*100:.0f}% disso é evitável não comprando / não repondo item sem giro.")
+
+    st.markdown("### Política sugerida")
+    st.markdown(f"""
+- **Curva {curvas.replace(' e ', '/').replace(' a ', '–')} sem giro:** teto de estoque = 1 unidade,
+  sem reposição automática; compra só sob demanda (encomenda).
+- **Medicamento propagado curva H–I:** exige aprovação do comprador; bloquear
+  transferência de sobra entre lojas para item já parado.
+- **Item marcado como suspenso/descontinuado no cadastro:** rotina mensal de
+  devolução ao fornecedor ou rebaixa de preço 90 dias antes do vencimento.
+- **Alerta de validade:** item curva A–D com estoque > 2× média de venda e
+  validade < 120 dias → aviso pra loja (essa parte hoje já vaza pouco: {PCT(
+      CTX['vclass'].query("balde=='pdv'").valor_total.sum() /
+      (CTX['vclass'].valor_total.sum() or 1))} do vencido).
+""")
+
+    with st.container(border=True):
+        st.markdown("**Itens que a regra pegaria** (maior valor primeiro)")
+        d = vc[(vc["balde"] == "compra") &
+               (vc["curva_valor"].astype(str).str.upper().isin([x.upper() for x in mp]))]
+        if macro != "todas":
+            d = d[d["macro"] == macro]
+        tab = (d.groupby("produto", as_index=False)
+               .agg(valor=("valor_total", "sum"), curva=("curva_valor", "first"),
+                    macro=("macro", "first"), cat=("cat1", "first"),
+                    dias_sem_vender=("ult_venda_dias", "max"), lojas=("loja", "nunique"))
+               .sort_values("valor", ascending=False).head(200))
+        st.dataframe(tab, hide_index=True, width="stretch", height=340,
+                     column_config={"valor": st.column_config.NumberColumn("R$ vencido", format="R$ %.0f")})
+        st.download_button("Baixar lista completa (CSV)",
+                           d.to_csv(index=False).encode("utf-8-sig"),
+                           "itens_regra.csv", "text/csv", icon=":material/download:")
+
+
+# --------------------------------------------------------------------------- #
+nav = st.navigation([
+    st.Page(tela_veredito, title="Veredito", icon=":material/speed:", default=True),
+    st.Page(tela_anatomia, title="Anatomia da perda", icon=":material/account_tree:"),
+    st.Page(tela_baldes, title="Evitável x estrutural", icon=":material/rule:"),
+    st.Page(tela_regras, title="Regras e simulação", icon=":material/tune:"),
+])
+nav.run()
