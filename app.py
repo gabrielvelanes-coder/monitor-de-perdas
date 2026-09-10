@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import glob
 import json
+import re
 from pathlib import Path
 
 import altair as alt
@@ -64,9 +65,9 @@ def _fat_arquivo(path, mtime):
     return core.load_faturamento(path)
 
 
-@st.cache_data(show_spinner="Cruzando vencidos com o cadastro…")
-def _vclass(perdas_sig, cad_sig, _perdas_df, _cad_df):
-    enr = core.enriquecer_vencidos(_perdas_df, _cad_df, ("vencido",))
+@st.cache_data(show_spinner="Cruzando com o cadastro…")
+def _vclass(perdas_sig, cad_sig, cats, _perdas_df, _cad_df):
+    enr = core.enriquecer_vencidos(_perdas_df, _cad_df, tuple(cats))
     return core.classificar_vencidos(enr)
 
 
@@ -159,11 +160,12 @@ def build_context() -> dict:
     cob = core.cobertura_faturamento(perdas_f, fat_f)
     n_meses_perda = max(perdas_f["ano_mes"].nunique(), 1)
 
+    psig = csig = None
     vclass = None
     if cad is not None:
         psig = (fonte, len(perdas))              # cache na base cheia; filtra depois
         csig = (len(cad), int(cad["produto"].nunique()))
-        vclass = _vclass(psig, csig, perdas, cad)
+        vclass = _vclass(psig, csig, ("vencido",), perdas, cad)
         if lojas_sel:
             vclass = vclass[vclass["loja"].isin(lojas_sel)]
         if meses_sel:
@@ -172,7 +174,7 @@ def build_context() -> dict:
     return dict(perdas=perdas_f, perdas_full=perdas, cad=cad, fat=fat_f, fonte=fonte,
                 escopo=escopo, meta=meta, incluir_dep=incluir_dep, taxa_lm=taxa_lm,
                 mensal=mensal, cob=cob, vclass=vclass, n_meses=n_meses_perda,
-                lojas_sel=lojas_sel, meses_sel=meses_sel)
+                lojas_sel=lojas_sel, meses_sel=meses_sel, psig=psig, csig=csig)
 
 
 def _editor_faturamento(perdas, fat):
@@ -248,6 +250,29 @@ def _mes_local(df: pd.DataFrame, key: str, container=None) -> list[str]:
         "Meses (nesta tela)", meses, default=[], key=key,
         placeholder="todos os meses do recorte",
         help="Vazio = todos os meses do filtro global.")
+
+
+# motivos que a Anatomia pode enxergar (além do vencido, que é o default do CTX)
+MOTIVO_OPCOES = {
+    "Vencido": ("vencido",),
+    "Danificado": ("danificado",),
+    "Furto ou roubo": ("furto",),
+    "Descontinuado": ("descontinuado",),
+    "Perda real (venc.+danif.+furto+descont.+outros)":
+        tuple(k for k in core.CATS if k != "ignorar" and core.IS_PERDA_REAL.get(k, True)),
+    "Todos os motivos": tuple(k for k in core.CATS if k != "ignorar"),
+}
+
+
+def _vclass_recorte(cats):
+    """vclass (enriquecido + classificado) para um conjunto de motivos, já
+    aplicado o recorte global de loja/mês. Cacheado por motivo em `_vclass`."""
+    v = _vclass(CTX["psig"], CTX["csig"], tuple(cats), CTX["perdas_full"], CTX["cad"])
+    if CTX["lojas_sel"]:
+        v = v[v["loja"].isin(CTX["lojas_sel"])]
+    if CTX["meses_sel"]:
+        v = v[v["ano_mes"].isin(CTX["meses_sel"])]
+    return v
 
 
 # =========================================================================== #
@@ -622,11 +647,19 @@ def tela_anatomia():
     st.title("O que são esses itens?")
     if _falta_cadastro():
         return
-    vc = CTX["vclass"].copy()
     st.caption("Recorte (filtro global): " + _recorte_txt())
 
-    # ---- filtros da tela: mês e loja (dentro do recorte global) ---------- #
-    c_mes, c_loja = st.columns(2)
+    # ---- motivo + filtros da tela (mês e loja, dentro do recorte global) --- #
+    c_mot, c_mes, c_loja = st.columns([2, 1, 1])
+    mot_label = c_mot.selectbox(
+        "Motivo da baixa", list(MOTIVO_OPCOES), key="anat_motivo",
+        help="A Anatomia olha vencidos por padrão. Troque para ver a mesma "
+             "anatomia (medicamento / curva / giro) de outro motivo de baixa.")
+    cats = MOTIVO_OPCOES[mot_label]
+    vc = (CTX["vclass"] if cats == ("vencido",) else _vclass_recorte(cats)).copy()
+    mot_curto = mot_label.split(" (")[0]
+    unidade = "do total" if cats != ("vencido",) else "do vencido"
+
     msel = _mes_local(vc, "anat_meses", c_mes)
     if msel:
         vc = vc[vc["ano_mes"].isin(msel)]
@@ -635,7 +668,7 @@ def tela_anatomia():
         vc = vc[vc["loja"].isin(lsel)]
 
     if vc.empty:
-        st.info("Sem vencidos nesse recorte.", icon=":material/info:")
+        st.info(f"Sem baixas de \"{mot_curto}\" nesse recorte.", icon=":material/info:")
         return
     tot = vc["valor_total"].sum() or 1.0
     tip_val = alt.Tooltip("valor_total:Q", title="R$ vencido", format=",.0f")
@@ -649,7 +682,7 @@ def tela_anatomia():
         for _, r in macro.iterrows():
             st.metric(MACRO_ROT.get(r["macro"], r["macro"].capitalize()),
                       BRL(r["valor_total"]),
-                      delta=f"{r['pct']*100:.0f}% do vencido", delta_color="off", border=True)
+                      delta=f"{r['pct']*100:.0f}% {unidade}", delta_color="off", border=True)
     sc = macro.loc[macro["macro"] == "sem classificacao", "valor_total"].sum()
     if sc:
         st.caption(f":material/help: **Sem classificação** = {BRL(sc)} em itens sem "
@@ -760,11 +793,12 @@ def tela_anatomia():
         if filtros:
             st.markdown("**Produtos — " +
                         " · ".join(f"{k}: {v}" for k, v in filtros) + "**")
-            st.caption(f"{len(d)} linhas de vencido · {BRL(d['valor_total'].sum())} · "
+            st.caption(f"{len(d)} linhas de {mot_curto.lower()} · "
+                       f"{BRL(d['valor_total'].sum())} · "
                        f"{d['itens'].sum():,.0f} unidades no recorte filtrado."
                        .replace(",", "."))
         else:
-            st.markdown("**Produtos** — todos os itens vencidos do recorte")
+            st.markdown(f"**Produtos** — todos os itens de \"{mot_curto}\" no recorte")
             st.caption("Clique numa barra dos gráficos acima para filtrar aqui. "
                        "Clique nos cabeçalhos da tabela para ordenar.")
         tab = (d.groupby("produto", as_index=False)
@@ -780,8 +814,8 @@ def tela_anatomia():
         st.dataframe(tab, hide_index=True, width="stretch", height=360,
                      column_config={
                          "produto": "Produto",
-                         "valor": st.column_config.NumberColumn("R$ vencido", format="R$ %.0f"),
-                         "itens": st.column_config.NumberColumn("Unidades vencidas", format="%.0f"),
+                         "valor": st.column_config.NumberColumn("R$", format="R$ %.0f"),
+                         "itens": st.column_config.NumberColumn("Unidades", format="%.0f"),
                          "curva_valor": "Curva valor", "curva_qtd": "Curva qtd",
                          "macro": "Categoria", "cat": "Árvore nível 1",
                          "faixa_giro": "Tempo parado",
@@ -790,9 +824,11 @@ def tela_anatomia():
                          "lojas_ids": "Lojas (ID)"})
         st.caption("As lojas são identificadas por número (2–25); não há nome de loja "
                    "no relatório de perdas. **Lojas (ID)** lista as lojas que "
-                   "vencerem o item; **Unidades vencidas** é a quantidade total.")
+                   f"baixaram o item por \"{mot_curto.lower()}\"; **Unidades** é a "
+                   "quantidade total.")
+        slug = re.sub(r"[^a-z0-9]+", "_", mot_curto.lower()).strip("_")
         st.download_button("Baixar (CSV)", tab.to_csv(index=False).encode("utf-8-sig"),
-                           "anatomia_produtos.csv", "text/csv",
+                           f"anatomia_{slug}.csv", "text/csv",
                            icon=":material/download:", key="anat_dl")
 
 
