@@ -2,6 +2,50 @@
 
 ## PENDENTE
 
+### 0. Reestruturação combinada com o Gabriel (2026-09-10) — RETOMAR AQUI
+O Gabriel pediu para documentar e continuar depois. Sequência acordada (proposta
+minha, ele topou a direção geral; encadear na ordem, commit a cada etapa):
+
+**a) Filtros globais na barra lateral.** Loja + Período saem de dentro de cada
+tela e viram slicer único no `build_context`, herdado por TODAS as telas. Hoje o
+filtro de loja está remendado tela a tela (Anatomia e Motivos já têm o seu; as
+outras não). Passar `lojas_sel` / `meses_sel` pelo `CTX` e cada `tela_*` aplica.
+
+**b) Veredito → "Painel".** Vira o dashboard-resumo. Topo: faturamento · perda R$
+(no escopo) · taxa % · gap vs meta (0,40%). Abaixo: evolução mensal (taxa × meta),
+ranking de lojas por taxa, mini-bridge de motivos (vencido / perda real / todos),
+top motivos. Tudo respeitando o filtro global. Reaproveitar o que já existe hoje
+na `tela_veredito` + pedaços da `tela_motivos`.
+
+**c) Anatomia com seletor de motivo.** Hoje `_vclass` (app.py) é travado em
+`("vencido",)`. Destravar: seletor de motivo (vencido / danificado / furto /
+"perda real" / todos) que recria o enriquecimento e recalcula medicamento /
+curva / giro. `core.enriquecer_vencidos` já aceita `cats=` — falta expor na UI e
+no cache `_vclass`.
+
+**d) Integrar as 2 bases de cadastro** (`BASE CADASTRO COM GRUPOS.xlsx` +
+`BASE CADASTRO COM EAN.xlsx`, já na pasta). Análise feita:
+
+| Achado | R$ | Ação |
+|---|---:|---|
+| `Classificação` do catálogo preenche o "sem classificação" atual | **17.865** de 22.039 (299 SKUs) | **integrar** — parte vira medicamento (uso contínuo, controlado, RX) |
+| Vencido de itens `Status = Inativo` no catálogo | 2.963 | pouco; vira só um **filtro ativo/inativo** |
+| Vencido de itens fora de qualquer base | 4.174 (40 SKUs) | resíduo, deixar como "fora do cadastro" |
+
+- `BASE CADASTRO COM GRUPOS.xlsx`: 44.707 linhas, **nível de catálogo (sem loja)**.
+  Colunas úteis: `Status` (Ativo 22.335 / Inativo 22.372), `Descrição` (chave de
+  join, única), `Código`, `Classificação` (ARVORE NOVA > ...), `Curva Valor`,
+  `Curva Qtd.`, `Princípio Ativo`, `Uso Contínuo`, `Fabricante`.
+- `BASE CADASTRO COM EAN.xlsx`: 58.249 linhas, `Código de Barras` ↔ `Produto`
+  ↔ preço. **Não serve pro join da perda** (relatório de perdas não tem EAN);
+  só serviria pra casar catálogo ↔ DADOS.
+- Plano: `core.load_catalogo(grupos)` keyed por `produto` (upper/strip). Em
+  `enriquecer_vencidos`, após o merge `(loja,produto)` com o DADOS, um
+  `.merge(catалogo, on="produto", how="left")` e coalescer `classif` /
+  `curva_valor` / `curva_qtd`; adicionar `status_cadastro`. **DADOS continua
+  sendo a base operacional** (giro/mvm/estoque) — o catálogo só enriquece.
+- Cobertura de produtos do vencido: DADOS 97% · catálogo 99%.
+
 ### 1. Faturamento de setembro/2026
 `faturamento.csv` vai até **2026-08**. Setembro ainda não fechou (dado de perda
 também é parcial). Quando fechar: pegar no Power BI *Visão geral - mês*, mês = set,
@@ -18,6 +62,15 @@ Enquanto não conectar, dados do Power BI entram por print/export manual.
 ---
 
 ## FEITO NESTA SESSÃO (2026-09-10)
+
+### Commit `45afa58` — Motivos c/ filtro de loja; Anatomia R$/unidades; meta 0,40%
+- `tela_motivos`: multiselect de **Lojas** (vazio = todas), ao lado de Meses;
+  filtra `perdas` e `fat` juntos p/ o % não distorcer.
+- `tela_anatomia`: novo radio **"Medida dos gráficos"** (R$ vencido / Unidades)
+  que rege o eixo x dos 3 gráficos; tooltip de todos passa a mostrar R$ **e**
+  unidades sempre. Groupby dos 3 agora agrega `valor_total` **e** `itens`.
+- **Meta de perdas: default do slider 0,50% → 0,40%** (definição do Gabriel,
+  `app.py` `build_context`). É a meta oficial agora.
 
 ### Commit `46d77bf` — Anatomia: loja, curva e gráficos clicáveis
 - `core.macro_categoria()` simplificada pela regra do Gabriel: no nível 1 da
