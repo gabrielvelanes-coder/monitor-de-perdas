@@ -19,13 +19,14 @@ de ranking de lojas por taxa (barras no semáforo + régua da meta). Bridge de
 escopo + top motivos reaproveitados da tela Motivos. "Bater com o número da
 reunião" foi para um expander. Helpers novos: `CLASSE_COR`, `_cor_taxa`.
 
-**c) Anatomia com seletor de motivo. — RETOMAR AQUI.** Hoje `_vclass` (app.py) é travado em
-`("vencido",)`. Destravar: seletor de motivo (vencido / danificado / furto /
-"perda real" / todos) que recria o enriquecimento e recalcula medicamento /
-curva / giro. `core.enriquecer_vencidos` já aceita `cats=` — falta expor na UI e
-no cache `_vclass`.
+**c) Anatomia com seletor de motivo.** ✅ FEITO — commit `3c38334`. `_vclass`
+recebe `cats` e cacheia por conjunto de motivos; `build_context` passa
+`("vencido",)` p/ o `CTX["vclass"]` e expõe `psig`/`csig`. Helper
+`_vclass_recorte(cats)` roda o cache com outro conjunto e reaplica o recorte
+global. `tela_anatomia` tem selectbox "Motivo da baixa" (Vencido / Danificado /
+Furto / Descontinuado / Perda real / Todos os motivos).
 
-**d) Integrar as 2 bases de cadastro** (`BASE CADASTRO COM GRUPOS.xlsx` +
+**d) Integrar as 2 bases de cadastro. — RETOMAR AQUI.** (`BASE CADASTRO COM GRUPOS.xlsx` +
 `BASE CADASTRO COM EAN.xlsx`, já na pasta). Análise feita:
 
 | Achado | R$ | Ação |
@@ -64,6 +65,16 @@ Enquanto não conectar, dados do Power BI entram por print/export manual.
 ---
 
 ## FEITO NESTA SESSÃO (2026-09-10)
+
+### Commit `3c38334` — Anatomia com seletor de motivo (item 0c)
+`_vclass(perdas_sig, cad_sig, cats, _perdas, _cad)` — `cats` entra na chave do
+cache. `build_context` chama com `("vencido",)` p/ o `CTX["vclass"]` (Painel /
+Evitável / Regras seguem só-vencido) e devolve `psig`/`csig`. Módulo:
+`MOTIVO_OPCOES` (6 opções) + `_vclass_recorte(cats)` que roda o cache e reaplica
+loja/mês do filtro global. `tela_anatomia`: selectbox "Motivo da baixa" ao lado
+de mês/loja; Vencido reusa o CTX, os demais recalculam. Números: Vencido
+219.827 / 146.589 / 22.039 · Perda real 224.232 / 162.558 / 23.367 · Todos
+235.839 / 219.156 / 34.616 (medicamento / não-medic. / sem classificação).
 
 ### Commit `da48837` — Filtro de mês na tela em todas as telas
 Helper `_mes_local(df, key, container=)` espelhando `_loja_local` (some quando o
