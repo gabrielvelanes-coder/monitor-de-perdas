@@ -242,13 +242,48 @@ def _loja_local(df: pd.DataFrame, key: str, container=None) -> list[int]:
 # =========================================================================== #
 def tela_veredito():
     st.title("Painel")
-    m, esc, meta = CTX["mensal"], CTX["escopo"], CTX["meta"]
-    st.caption(f"Escopo: {core.ESCOPOS[esc]} · recorte: {_recorte_txt()} · "
+    esc, meta, incluir_dep = CTX["escopo"], CTX["meta"], CTX["incluir_dep"]
+    st.caption(f"Escopo: {core.ESCOPOS[esc]} · recorte global: {_recorte_txt()} · "
                f"fonte `{CTX['fonte']}`")
+
+    # ---- filtros da tela: mês e loja (dentro do recorte global) --------- #
+    perdas, fat = CTX["perdas"], CTX["fat"]
+    c_mes, c_loja = st.columns(2)
+    meses_disp = sorted(perdas["ano_mes"].unique())
+    msel = c_mes.multiselect("Meses (nesta tela)", meses_disp, default=[],
+                             placeholder="todos os meses do recorte", key="pnl_meses",
+                             help="Vazio = todos os meses do filtro global.")
+    if msel:
+        perdas = perdas[perdas["ano_mes"].isin(msel)]
+        fat = fat[fat["ano_mes"].isin(msel)] if not fat.empty else fat
+    lsel = _loja_local(perdas, "pnl_lojas", c_loja)
+    if lsel:
+        perdas = perdas[perdas["loja"].isin(lsel)]
+        fat = fat[fat["loja"].isin(lsel)] if not fat.empty else fat
+    if msel or lsel:
+        st.caption("Refinado nesta tela: "
+                   + (", ".join(sorted(msel)) if msel else "todos os meses") + " · "
+                   + ("lojas " + ", ".join(str(x) for x in lsel) if lsel else "todas as lojas"))
+
+    if perdas.empty:
+        st.info("Sem lançamentos nesse recorte.", icon=":material/info:")
+        return
+
+    # ---- derivados no recorte da tela --------------------------------- #
+    taxa_lm = core.taxa_por_loja_mes(perdas, fat, esc, incluir_dep)
+    m = core.resumo_mensal(taxa_lm)
+    cob = core.cobertura_faturamento(perdas, fat)
+    nmes = max(perdas["ano_mes"].nunique(), 1)
+    vc = CTX["vclass"]
+    if vc is not None:
+        if msel:
+            vc = vc[vc["ano_mes"].isin(msel)]
+        if lsel:
+            vc = vc[vc["loja"].isin(lsel)]
 
     if m.empty:
         _sem_faturamento_aviso()
-        mm = (CTX["perdas"][CTX["perdas"]["motivo_cat"].map(lambda c: core.in_escopo(c, esc))]
+        mm = (perdas[perdas["motivo_cat"].map(lambda c: core.in_escopo(c, esc))]
               .groupby("ano_mes")["valor_total"].sum().reset_index())
         st.subheader("Valor da perda por mês")
         st.bar_chart(mm, x="ano_mes", y="valor_total", height=260)
@@ -265,9 +300,9 @@ def tela_veredito():
 
     nivel, frase = ("sem_dados", "")
     recuperavel = 0.0
-    if CTX["vclass"] is not None:
-        nivel, frase = core.frase_diagnostico(m, CTX["vclass"], meta)
-        rb = core.resumo_baldes(CTX["vclass"], CTX["n_meses"])
+    if vc is not None and not vc.empty:
+        nivel, frase = core.frase_diagnostico(m, vc, meta)
+        rb = core.resumo_baldes(vc, nmes)
         recuperavel = rb.loc[rb["balde"].isin(["compra", "cadastro"]), "valor_mes"].sum()
     nivel_show = nivel if nivel != "sem_dados" else _cor_taxa(taxa_pond, meta)
 
@@ -322,7 +357,7 @@ def tela_veredito():
     with right:
         with st.container(border=True):
             st.markdown("**Lojas por taxa de perdas** (% no período · tracejado = meta)")
-            rl = (CTX["taxa_lm"].dropna(subset=["faturamento"])
+            rl = (taxa_lm.dropna(subset=["faturamento"])
                   .groupby("loja", as_index=False)
                   .agg(perda=("perda", "sum"), faturamento=("faturamento", "sum")))
             if rl.empty:
@@ -345,13 +380,12 @@ def tela_veredito():
                 st.altair_chart(barras + meta_r, width="stretch")
 
     # ---- bridge de escopo + top motivos ---------------------------- #
-    p = CTX["perdas"]
-    if not CTX["incluir_dep"]:
+    p = perdas
+    if not incluir_dep:
         p = p[~p["is_dep"]]
     p = p[p["motivo_cat"] != "ignorar"].copy()
-    meses_cf = CTX["cob"]["meses_com_faturamento"]
+    meses_cf = cob["meses_com_faturamento"]
     p_cf = p[p["ano_mes"].isin(meses_cf)]
-    nmes = CTX["n_meses"]
 
     left, right = st.columns(2)
     with left:
@@ -383,7 +417,6 @@ def tela_veredito():
             st.altair_chart(ch, width="stretch")
 
     # ---- meses sem faturamento (perda em R$) ---------------------- #
-    cob = CTX["cob"]
     meses_sf = cob["meses_sem_faturamento"]
     if meses_sf:
         ps = p[p["motivo_cat"].map(lambda c: core.in_escopo(c, esc))
