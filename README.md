@@ -7,9 +7,18 @@ vencimento cruzando com curva / giro / estoque.
 ## Por que existe
 
 Numa reunião foi apresentada uma taxa de perdas que parecia alta demais.
-Cruzando o relatório de baixa de estoque com o faturamento, a perda real fica
-em torno de **0,3 % a 0,7 % do faturamento** (vencido responde por ~79 % do
-valor). Distorções comuns num número inflado:
+Cruzando o relatório de baixa de estoque com o faturamento real por loja
+(Power BI *Visão geral - trimestre*, T1 e T2/2026), a taxa fica em:
+
+| Recorte | % do faturamento | R$/mês |
+|---|---:|---:|
+| Somente vencidos | **0,51 %** | ~44 mil |
+| Perda real (venc.+danif.+furto+descont.) | **0,54 %** | ~47 mil |
+| Todos os motivos | **0,62 %** | ~54 mil |
+
+Confere com a própria coluna `%perda/fat` do Power BI (0,63 % no T1, 0,59 % no T2).
+Vencido responde por ~79 % do valor. Faixa normal de varejo farma é 0,3 %–0,8 %.
+Distorções comuns num número inflado:
 
 - somar a linha **"Total"** do relatório (ela já é a soma de tudo → dobra o valor);
 - contar **AÇÃO DE MARKETING, CONSUMO LOJA, REEMBOLSO PELO FORNECEDOR** como
