@@ -2,16 +2,17 @@
 
 ## PENDENTE
 
-### 0. Reestruturação combinada com o Gabriel (2026-09-10) — RETOMAR AQUI
+### 0. Reestruturação combinada com o Gabriel (2026-09-10)
 O Gabriel pediu para documentar e continuar depois. Sequência acordada (proposta
 minha, ele topou a direção geral; encadear na ordem, commit a cada etapa):
 
-**a) Filtros globais na barra lateral.** Loja + Período saem de dentro de cada
-tela e viram slicer único no `build_context`, herdado por TODAS as telas. Hoje o
-filtro de loja está remendado tela a tela (Anatomia e Motivos já têm o seu; as
-outras não). Passar `lojas_sel` / `meses_sel` pelo `CTX` e cada `tela_*` aplica.
+**a) Filtros globais na barra lateral.** ✅ FEITO — commit `57f2dec`. Loja +
+Período viraram dois multiselect no `build_context` (vazio = tudo), aplicados em
+`perdas`/`fat` antes dos derivados e no resultado do cache `_vclass`. `CTX` expõe
+`lojas_sel` / `meses_sel` / `perdas_full`. `tela_motivos` e `tela_anatomia`
+perderam os multiselect locais; todas as telas mostram "Recorte (filtro global)".
 
-**b) Veredito → "Painel".** Vira o dashboard-resumo. Topo: faturamento · perda R$
+**b) Veredito → "Painel". — RETOMAR AQUI.** Vira o dashboard-resumo. Topo: faturamento · perda R$
 (no escopo) · taxa % · gap vs meta (0,40%). Abaixo: evolução mensal (taxa × meta),
 ranking de lojas por taxa, mini-bridge de motivos (vencido / perda real / todos),
 top motivos. Tudo respeitando o filtro global. Reaproveitar o que já existe hoje
@@ -62,6 +63,21 @@ Enquanto não conectar, dados do Power BI entram por print/export manual.
 ---
 
 ## FEITO NESTA SESSÃO (2026-09-10)
+
+### Commit `57f2dec` — Filtros globais de Loja e Período (item 0a)
+- `build_context`: bloco "### Filtros" na sidebar com dois multiselect —
+  **Lojas** e **Período (meses)**, vazio = tudo (`key="g_lojas"` / `"g_meses"`).
+- O recorte é aplicado em `perdas`/`fat` **antes** dos derivados (`taxa_lm`,
+  `mensal`, `cob`, `n_meses`) e no **resultado** do cache `_vclass` — o cross
+  vencido×cadastro continua sendo calculado na base cheia (cache estável) e só
+  depois filtrado por loja/mês.
+- `CTX` agora expõe: `perdas` (já filtrado), `perdas_full` (base cheia, usada só
+  pelo editor de faturamento), `fat` (filtrado), `lojas_sel`, `meses_sel`.
+- `tela_motivos` e `tela_anatomia`: removidos os multiselect locais de Loja/Mês.
+  `tela_motivos` ganhou guard para recorte sem lançamentos; `tela_baldes` e
+  `tela_regras`, guard para `vclass` vazio.
+- Helper `_recorte_txt()` + legenda "Recorte (filtro global): …" no topo das 5
+  telas. Smoke test (`streamlit.testing`) nas 5 telas, com e sem filtro: 0 exc.
 
 ### Commit `45afa58` — Motivos c/ filtro de loja; Anatomia R$/unidades; meta 0,40%
 - `tela_motivos`: multiselect de **Lojas** (vazio = todas), ao lado de Meses;
