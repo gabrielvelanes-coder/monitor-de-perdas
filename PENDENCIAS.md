@@ -58,6 +58,14 @@ Enquanto não conectar, dados do Power BI entram por print/export manual.
 
 ## FEITO NESTA SESSÃO (2026-09-10)
 
+### Commit `c5ecc70` — Anatomia: ajustes de leitura (feedback do Gabriel)
+Cartão **"Total — <motivo>"** na linha de KPIs (R$ + unidades + linhas). Gráfico
+"Tem curva?" → **"Curva"**, estratificado por letra **A…I** (+ "Sem cadastro")
+em vez dos baldes A–D/E–G/H–I (`_cletra`/`ORD_LETRA` no lugar de `_cg`/`ORD_CURVA`;
+filtro da tabela usa `cletra`). **Rótulo de valor em cada barra** dos 3 gráficos
+(categoria, curva, tempo parado) via camada `mark_text`. Coluna "R$" da tabela →
+"Total perda (R$)".
+
 ### Commit `9268722` — Catálogo BASE CADASTRO COM GRUPOS na Anatomia (item 0d)
 `core.load_catalogo(sources)` lê a BASE CADASTRO COM GRUPOS (nível produto, sem
 loja), chave = `Descrição` normalizada (`_norm_produto` = `_ascii`), dedup por
