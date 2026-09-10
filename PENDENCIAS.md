@@ -321,10 +321,14 @@ explícita. Hoje já dá para ver na barra lateral: **Parâmetros → Escopo →
 ---
 
 ## Estado do app (fim da sessão 2026-09-10)
-- **5 telas** via `st.navigation`: Painel · Motivos · Anatomia da perda ·
-  Evitável x estrutural · Regras e simulação.
+- **5 telas** via `st.navigation`, `st.title` = rótulo do menu: Painel · Motivos ·
+  Anatomia da perda · Evitável x estrutural · Regras e simulação.
 - **Filtros:** global na sidebar (Lojas + Período) + `Meses/Lojas (nesta tela)`
   em todas as telas. Parâmetros: Escopo, Meta (default 0,40 %), Incluir DEP.
+- **Anatomia:** abre em "Todos os motivos"; bloco fixo "Todos os motivos no
+  recorte" mostra a foto completa da loja/mês sempre; tabela é 1 linha por
+  produto × motivo. Join catálogo por descrição exata — item com nome de
+  embalagem diferente cai em "fora do catálogo".
 - **Entradas:** `perdas*.xls` (obrigatório) · `DADOS*.xlsx` (cadastro por loja) ·
   `BASE CADASTRO COM GRUPOS.xlsx` (catálogo, só enriquece) · `faturamento.csv`
   (jan–ago/2026). Os 4 auto-detectados na pasta; todos com uploader na sidebar.

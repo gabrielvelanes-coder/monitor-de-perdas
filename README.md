@@ -10,7 +10,7 @@ onde vem o vencimento cruzando com curva / giro / estoque / catálogo.
 |---|---|
 | **Painel** | A perda é aceitável? 4 KPIs (faturamento · perda no escopo · taxa ponderada · gap vs meta), semáforo + diagnóstico automático, evolução mensal vs meta, ranking de lojas por taxa, bridge de escopo, top motivos. |
 | **Motivos** | O que é o quê? De-para de cada motivo de baixa: R$, % do faturamento, % do lançado, e se é perda de verdade (Vencido / Outra perda real / Não é perda). Explica a diferença entre a taxa da ferramenta e o `%perda/fat` do Power BI. |
-| **Anatomia da perda** | O que são esses itens? Por **motivo** (vencido / danificado / furto / descontinuado / perda real / todos), medicamento × não-medicamento × sem classificação, por categoria da árvore, por curva (A…I), por tempo parado ao vencer. Filtro por status no catálogo. Gráficos clicáveis filtram a tabela de produtos. |
+| **Anatomia da perda** | O que são esses itens? Abre em **Todos os motivos** e traz um bloco fixo "Todos os motivos no recorte" (R$/unid/linhas/produtos por motivo, marcando o que está na análise). Escopo Vencido / Perda real / Todos + motivos específicos. Medicamento × não-medicamento × sem classificação, por categoria da árvore, por curva (A…I), por tempo parado ao vencer. Filtro por status no catálogo (com aviso do que é escondido). Gráficos clicáveis filtram a tabela; a tabela é uma linha por produto **e motivo**. |
 | **Evitável × estrutural** | Estou dando perda em item que vende? 4 baldes — PDV / excesso de compra / item suspenso / fora do mix — com ação por item e ranking de lojas. |
 | **Regras e simulação** | O que mudar e quanto economiza. Simula teto de estoque por curva/categoria e estima a economia/mês. |
 
@@ -117,12 +117,20 @@ base) — o resto virou medicamento (R$ 231.003) / não-medicamento (R$ 153.278)
 - O relatório `.xls` vem com acentos corrompidos (`A��O DE MARKENTIG`);
   a classificação de motivos e a chave de join do catálogo são feitas por trecho
   sem acento (`_ascii` / `_norm_produto`), então funciona mesmo assim.
+- **Join catálogo ↔ perda é por descrição exata normalizada.** Variações de
+  embalagem no nome (`... UNO` vs `... UNO CX C/ 200`) não casam → o item vira
+  "fora do catálogo" e some se você filtrar "Status no catálogo = Ativos"
+  (a Anatomia avisa quanto foi escondido). Cobertura ~99 %. Se virar problema,
+  casar por `Código` em vez de descrição.
 - Lojas que aparecem na perda mas não no faturamento (ex.: 12, DEP) são listadas
   no Painel e ficam fora do cálculo de %.
-- `_vclass` (cross vencido × cadastro × catálogo) é cacheado por **conjunto de
-  motivos**; o Painel/Evitável/Regras usam `("vencido",)`, a Anatomia troca via
-  `_vclass_recorte(cats)`.
+- `_vclass` (cross cadastro × catálogo) é cacheado por **conjunto de motivos**;
+  Painel/Evitável/Regras usam `("vencido",)`; a Anatomia troca via
+  `_vclass_recorte(cats)` e mostra o bloco "Todos os motivos" com
+  `_cats_do_escopo("todos")`.
 - Tema: `.streamlit/config.toml` (financial-dashboard, dark, sem toggle).
 - `core.py` = carga + cálculo (funções puras). `app.py` = 5 telas via
-  `st.navigation` + `build_context()` (sidebar + cargas + `CTX`).
+  `st.navigation` + `build_context()` (sidebar + cargas + `CTX`). O `st.title()`
+  de cada tela é igual ao rótulo do menu; a pergunta que a tela responde fica na
+  legenda logo abaixo.
 - Histórico e pendências detalhados em `PENDENCIAS.md`.
