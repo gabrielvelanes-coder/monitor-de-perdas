@@ -307,9 +307,12 @@ def tela_anatomia():
             st.altair_chart(ch, width="stretch")
     with right:
         with st.container(border=True):
-            st.markdown("**Tem curva? (curva de valor)**")
+            st.markdown("**Tem curva?**")
+            qual = st.segmented_control("curva", ["Curva de valor", "Curva de quantidade"],
+                                        default="Curva de valor", label_visibility="collapsed")
+            col_curva = "curva_qtd" if qual == "Curva de quantidade" else "curva_valor"
             cv = vc.copy()
-            cv["cg"] = cv["curva_valor"].astype(str).str.upper().map(
+            cv["cg"] = cv[col_curva].astype(str).str.upper().map(
                 lambda x: "A–D (relevante)" if x in list("ABCD")
                 else ("E–G (média)" if x in list("EFG")
                       else ("H–I (cauda)" if x in list("HI") else "Sem cadastro")))
@@ -339,12 +342,15 @@ def tela_anatomia():
         d = vc if cat_pick == "(todas)" else vc[vc["cat1"] == cat_pick]
         tab = (d.groupby("produto", as_index=False)
                .agg(valor=("valor_total", "sum"), itens=("itens", "sum"),
-                    curva=("curva_valor", "first"), macro=("macro", "first"),
-                    cat=("cat1", "first"), dias_sem_vender=("ult_venda_dias", "max"),
-                    lojas=("loja", "nunique"))
+                    curva_valor=("curva_valor", "first"), curva_qtd=("curva_qtd", "first"),
+                    macro=("macro", "first"), cat=("cat1", "first"),
+                    dias_sem_vender=("ult_venda_dias", "max"), lojas=("loja", "nunique"))
                .sort_values("valor", ascending=False).head(300))
         st.dataframe(tab, hide_index=True, width="stretch", height=360,
-                     column_config={"valor": st.column_config.NumberColumn("R$ vencido", format="R$ %.0f")})
+                     column_config={
+                         "valor": st.column_config.NumberColumn("R$ vencido", format="R$ %.0f"),
+                         "curva_valor": "Curva valor", "curva_qtd": "Curva qtd",
+                         "dias_sem_vender": "Dias s/ vender"})
 
 
 # =========================================================================== #
@@ -402,12 +408,14 @@ def tela_baldes():
             st.caption(f":material/bolt: **Ação:** {r['acao']}")
             d = vc[vc["balde"] == r["balde"]]
             tab = (d.groupby("produto", as_index=False)
-                   .agg(valor=("valor_total", "sum"), curva=("curva_valor", "first"),
-                        macro=("macro", "first"), dias_sem_vender=("ult_venda_dias", "max"),
-                        lojas=("loja", "nunique"))
+                   .agg(valor=("valor_total", "sum"), curva_valor=("curva_valor", "first"),
+                        curva_qtd=("curva_qtd", "first"), macro=("macro", "first"),
+                        dias_sem_vender=("ult_venda_dias", "max"), lojas=("loja", "nunique"))
                    .sort_values("valor", ascending=False).head(80))
             st.dataframe(tab, hide_index=True, width="stretch", height=280,
-                         column_config={"valor": st.column_config.NumberColumn("R$", format="R$ %.0f")})
+                         column_config={"valor": st.column_config.NumberColumn("R$", format="R$ %.0f"),
+                                        "curva_valor": "Curva valor", "curva_qtd": "Curva qtd",
+                                        "dias_sem_vender": "Dias s/ vender"})
 
 
 # =========================================================================== #
@@ -467,12 +475,16 @@ def tela_regras():
         if macro != "todas":
             d = d[d["macro"] == macro]
         tab = (d.groupby("produto", as_index=False)
-               .agg(valor=("valor_total", "sum"), curva=("curva_valor", "first"),
-                    macro=("macro", "first"), cat=("cat1", "first"),
-                    dias_sem_vender=("ult_venda_dias", "max"), lojas=("loja", "nunique"))
+               .agg(valor=("valor_total", "sum"), curva_valor=("curva_valor", "first"),
+                    curva_qtd=("curva_qtd", "first"), macro=("macro", "first"),
+                    cat=("cat1", "first"), dias_sem_vender=("ult_venda_dias", "max"),
+                    lojas=("loja", "nunique"))
                .sort_values("valor", ascending=False).head(200))
         st.dataframe(tab, hide_index=True, width="stretch", height=340,
-                     column_config={"valor": st.column_config.NumberColumn("R$ vencido", format="R$ %.0f")})
+                     column_config={
+                         "valor": st.column_config.NumberColumn("R$ vencido", format="R$ %.0f"),
+                         "curva_valor": "Curva valor", "curva_qtd": "Curva qtd",
+                         "dias_sem_vender": "Dias s/ vender"})
         st.download_button("Baixar lista completa (CSV)",
                            d.to_csv(index=False).encode("utf-8-sig"),
                            "itens_regra.csv", "text/csv", icon=":material/download:")
