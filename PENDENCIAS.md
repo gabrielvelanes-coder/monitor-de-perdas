@@ -48,11 +48,13 @@ a coluna **Receita** por **Und. ID** (22 lojas: 2–11, 13–20, 22–25; não h
 e acrescentar as linhas `loja,2026-09,valor` no `faturamento.csv`.
 Conferir sempre: soma das 22 lojas = Total exibido no rodapé do relatório.
 
-### 2. Extensão Claude no Chrome não conecta
-Tentado várias vezes nesta sessão; `list_connected_browsers` volta vazio.
-A extensão instalada é a "Claude" comum (chat lateral). O controle de navegador
-pelo Claude Code é preview liberado por conta — pode não estar habilitado.
-Enquanto não conectar, dados do Power BI entram por print/export manual.
+### 2. Extensão Claude no Chrome — ✅ CONECTOU (2026-09-10, mais tarde)
+Voltou a conectar ("Browser 1", Windows local). Verificado no app rodando:
+Painel, Motivos e Anatomia renderizam certo (cartão Total R$ 388.455, gráfico
+"Curva" A–I, rótulos nas barras, tabela "Total perda (R$)"). Observação: o
+`Page.captureScreenshot` dá timeout às vezes — o renderizador do Streamlit é
+pesado (dataframes grandes + Altair em camadas); espera + repete resolve.
+Agora dá para puxar dados do Power BI pela extensão em vez de print manual.
 
 ---
 
