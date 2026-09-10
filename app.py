@@ -237,6 +237,19 @@ def _loja_local(df: pd.DataFrame, key: str, container=None) -> list[int]:
         help="Restringe ainda mais dentro do filtro global da barra lateral.")
 
 
+def _mes_local(df: pd.DataFrame, key: str, container=None) -> list[str]:
+    """Multiselect de Meses dentro da tela, restringindo o recorte global.
+    Não aparece quando o recorte já tem 0 ou 1 mês."""
+    c = container if container is not None else st
+    meses = sorted(df["ano_mes"].dropna().unique())
+    if len(meses) <= 1:
+        return []
+    return c.multiselect(
+        "Meses (nesta tela)", meses, default=[], key=key,
+        placeholder="todos os meses do recorte",
+        help="Vazio = todos os meses do filtro global.")
+
+
 # =========================================================================== #
 # TELA 1 — PAINEL (resumo executivo — respeita o filtro global)
 # =========================================================================== #
@@ -249,10 +262,7 @@ def tela_veredito():
     # ---- filtros da tela: mês e loja (dentro do recorte global) --------- #
     perdas, fat = CTX["perdas"], CTX["fat"]
     c_mes, c_loja = st.columns(2)
-    meses_disp = sorted(perdas["ano_mes"].unique())
-    msel = c_mes.multiselect("Meses (nesta tela)", meses_disp, default=[],
-                             placeholder="todos os meses do recorte", key="pnl_meses",
-                             help="Vazio = todos os meses do filtro global.")
+    msel = _mes_local(perdas, "pnl_meses", c_mes)
     if msel:
         perdas = perdas[perdas["ano_mes"].isin(msel)]
         fat = fat[fat["ano_mes"].isin(msel)] if not fat.empty else fat
@@ -478,15 +488,20 @@ def tela_motivos():
         st.info("Sem lançamentos nesse recorte.", icon=":material/info:")
         return
 
-    lsel = _loja_local(p, "mot_lojas")
+    c_mes, c_loja = st.columns(2)
+    msel = _mes_local(p, "mot_meses", c_mes)
+    if msel:
+        p = p[p["ano_mes"].isin(msel)]
+        fat = fat[fat["ano_mes"].isin(msel)] if not fat.empty else fat
+    lsel = _loja_local(p, "mot_lojas", c_loja)
     if lsel:
         p = p[p["loja"].isin(lsel)]
         fat = fat[fat["loja"].isin(lsel)] if not fat.empty else fat
-        if p.empty:
-            st.info("Sem lançamentos nessas lojas.", icon=":material/info:")
-            return
+    if p.empty:
+        st.info("Sem lançamentos nesse recorte da tela.", icon=":material/info:")
+        return
 
-    sel = sorted(p["ano_mes"].unique())            # meses já vêm do filtro global
+    sel = sorted(p["ano_mes"].unique())            # meses do recorte (global + tela)
     meses_com_fat = (sorted(set(fat["ano_mes"].unique()) & set(sel))
                      if not fat.empty else [])
     n_meses = max(len(sel), 1)
@@ -612,10 +627,7 @@ def tela_anatomia():
 
     # ---- filtros da tela: mês e loja (dentro do recorte global) ---------- #
     c_mes, c_loja = st.columns(2)
-    meses_disp = sorted(vc["ano_mes"].unique())
-    msel = c_mes.multiselect("Meses (nesta tela)", meses_disp, default=[],
-                             placeholder="todos os meses do recorte", key="anat_meses",
-                             help="Vazio = todos os meses do filtro global.")
+    msel = _mes_local(vc, "anat_meses", c_mes)
     if msel:
         vc = vc[vc["ano_mes"].isin(msel)]
     lsel = _loja_local(vc, "anat_lojas", c_loja)
@@ -793,13 +805,17 @@ def tela_baldes():
         return
     st.caption("Recorte (filtro global): " + _recorte_txt())
     vc = CTX["vclass"]
-    nm = CTX["n_meses"]
-    lsel = _loja_local(vc, "bald_lojas")
+    c_mes, c_loja = st.columns(2)
+    msel = _mes_local(vc, "bald_meses", c_mes)
+    if msel:
+        vc = vc[vc["ano_mes"].isin(msel)]
+    lsel = _loja_local(vc, "bald_lojas", c_loja)
     if lsel:
         vc = vc[vc["loja"].isin(lsel)]
     if vc.empty:
         st.info("Sem vencidos nesse recorte.", icon=":material/info:")
         return
+    nm = max(vc["ano_mes"].nunique(), 1)
     rb = core.resumo_baldes(vc, nm)
     tot_mes = rb["valor_mes"].sum()
 
@@ -865,10 +881,17 @@ def tela_regras():
         return
     st.caption("Recorte (filtro global): " + _recorte_txt())
     vc = CTX["vclass"]
-    nm = CTX["n_meses"]
+    c_mes, c_loja = st.columns(2)
+    msel = _mes_local(vc, "reg_meses", c_mes)
+    if msel:
+        vc = vc[vc["ano_mes"].isin(msel)]
+    lsel = _loja_local(vc, "reg_lojas", c_loja)
+    if lsel:
+        vc = vc[vc["loja"].isin(lsel)]
     if vc.empty:
         st.info("Sem vencidos nesse recorte.", icon=":material/info:")
         return
+    nm = max(vc["ano_mes"].nunique(), 1)
 
     st.markdown(
         "A perda é **cauda longa** (milhares de SKUs, cada um pouco), então não adianta "
