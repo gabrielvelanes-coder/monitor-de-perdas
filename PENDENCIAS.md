@@ -2,47 +2,14 @@
 
 ## PENDENTE
 
-### 1. Tela "Motivos" — decompor o que é o quê (PEDIDO, não feito)
-Objetivo: uma tela nova que mostra **cada motivo de baixa de estoque**, quanto pesa
-em R$ e em % do faturamento, e a **classe** (perda de verdade ou não). É o "de-para"
-que explica por que a ferramenta mostra 0,61% e o Power BI mostra 0,96% (ago/2026).
-
-Especificação combinada:
-
-- **Filtro de meses** (multiselect), default = meses que têm faturamento.
-- **3 cartões (bridge de escopo):**
-  - Somente vencidos — só `PRODUTO VENCIDO`.
-  - Perda real — vencido + danificado + furto + descontinuado + não classificado.
-  - Todos os motivos — inclui marketing, consumo de loja, reembolso, doação, etc.
-    (é o que reproduz o `%perda/fat` do Power BI).
-  - Cada cartão: R$/mês + % do faturamento.
-- **Tabela por motivo:** Motivo | Classe | R$ no período | R$/mês | % do faturamento |
-  % do lançado | Linhas. Ordenada por valor.
-- **Gráfico de barras** por motivo, colorido pela classe.
-- **Gráfico por mês** empilhado por classe (mostra o salto de agosto).
-- Classe em 3 baldes: `Vencido` / `Outra perda real` / `Não é perda`.
-- Aviso quando a seleção inclui mês sem faturamento (entra no R$/mês, não na %).
-
-Implementação sugerida:
-- `core.py`: adicionar `classe_motivo(motivo_cat) -> str` e `CLASSES_PERDA`
-  (lista ordenada), perto de `in_escopo`. Assim a regra "o que conta como o quê"
-  fica num lugar só, junto de `CATS` / `ESCOPOS`.
-- `app.py`: função `tela_motivos()` e registrar em `st.navigation` como 2ª tela
-  (depois de Veredito, antes de Anatomia).
-- `core.perda_por_motivo()` já existe e hoje está sem uso — pode servir de base,
-  mas a tela precisa também de corte por mês e da coluna % do faturamento, que
-  ela não entrega; provavelmente mais simples calcular inline no `app.py`.
-
-Cores por classe: Vencido `#F87171`, Outra perda real `#FB923C`, Não é perda `#94A3B8`.
-
-### 2. Faturamento de setembro/2026
+### 1. Faturamento de setembro/2026
 `faturamento.csv` vai até **2026-08**. Setembro ainda não fechou (dado de perda
 também é parcial). Quando fechar: pegar no Power BI *Visão geral - mês*, mês = set,
 a coluna **Receita** por **Und. ID** (22 lojas: 2–11, 13–20, 22–25; não há 12 nem 21),
 e acrescentar as linhas `loja,2026-09,valor` no `faturamento.csv`.
 Conferir sempre: soma das 22 lojas = Total exibido no rodapé do relatório.
 
-### 3. Extensão Claude no Chrome não conecta
+### 2. Extensão Claude no Chrome não conecta
 Tentado várias vezes nesta sessão; `list_connected_browsers` volta vazio.
 A extensão instalada é a "Claude" comum (chat lateral). O controle de navegador
 pelo Claude Code é preview liberado por conta — pode não estar habilitado.
@@ -51,6 +18,27 @@ Enquanto não conectar, dados do Power BI entram por print/export manual.
 ---
 
 ## FEITO NESTA SESSÃO (2026-09-10)
+
+### Commit `a787f5f` — tela "Motivos" (de-para de escopo)
+Entregue conforme a spec que estava aqui. `core.py`: `classe_motivo(motivo_cat)`
++ `CLASSES_PERDA` (3 baldes: `Vencido` / `Outra perda real` / `Não é perda`,
+coerente com `IS_PERDA_REAL` — só destaca o vencido). `app.py`: `tela_motivos()`,
+2ª tela do `st.navigation` (ícone `category`).
+
+- Filtro de meses (multiselect), default = meses com faturamento.
+- 3 cartões de bridge de escopo (reusa `core.in_escopo`): Somente vencidos /
+  Perda real / Todos os motivos — cada um com R$/mês + % do faturamento.
+- Tabela por motivo: Motivo | Classe | R$ no período | R$/mês | % do faturamento
+  | % do lançado | Linhas, ordenada por valor.
+- Barra por motivo colorida pela classe + barra mensal empilhada por classe.
+- % do faturamento usa só os meses da seleção que têm faturamento; meses sem
+  faturamento entram no R$/mês e aparecem num aviso (`:material/info:`).
+- Cálculo inline no `app.py` (não usa `core.perda_por_motivo`, que não entrega
+  corte por mês nem % do faturamento).
+
+Conferência jan–ago/2026 (todas as lojas, sem DEP): somente vencidos 0,55% ·
+perda real 0,58% · todos os motivos 0,69% do faturamento acumulado. Para
+reproduzir o 0,96% do BI de agosto, filtrar só `2026-08` no multiselect.
 
 ### Commit `5b681c3` — correções da revisão do app
 - **`frase_diagnostico` (core.py):** agora usa a **meta do slider** para o semáforo
