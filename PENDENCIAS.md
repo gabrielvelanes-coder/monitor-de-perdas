@@ -2,9 +2,10 @@
 
 ## PENDENTE
 
-### 0. Reestruturação combinada com o Gabriel (2026-09-10)
+### 0. Reestruturação combinada com o Gabriel (2026-09-10) — ✅ CONCLUÍDA (a–d)
 O Gabriel pediu para documentar e continuar depois. Sequência acordada (proposta
-minha, ele topou a direção geral; encadear na ordem, commit a cada etapa):
+minha, ele topou a direção geral; encadear na ordem, commit a cada etapa).
+Todos os quatro itens feitos nesta sessão + rodada de ajustes de filtro/tela.
 
 **a) Filtros globais na barra lateral.** ✅ FEITO — commit `57f2dec`. Loja +
 Período viraram dois multiselect no `build_context` (vazio = tudo), aplicados em
@@ -26,28 +27,19 @@ recebe `cats` e cacheia por conjunto de motivos; `build_context` passa
 global. `tela_anatomia` tem selectbox "Motivo da baixa" (Vencido / Danificado /
 Furto / Descontinuado / Perda real / Todos os motivos).
 
-**d) Integrar as 2 bases de cadastro. — RETOMAR AQUI.** (`BASE CADASTRO COM GRUPOS.xlsx` +
-`BASE CADASTRO COM EAN.xlsx`, já na pasta). Análise feita:
+**d) Integrar o catálogo (BASE CADASTRO COM GRUPOS).** ✅ FEITO — commit `9268722`.
+`core.load_catalogo` (nível produto, chave = Descrição normalizada);
+`enriquecer_vencidos(catalogo=)` coalesce `classif` / `curva_valor` / `curva_qtd`
+após o merge do DADOS (DADOS tem prioridade; `sem_cadastro` fixado antes).
+`_vclass` recebe `cat_sig` + `_cat_df`. Anatomia ganhou radio "Status no
+catálogo" (Todos / Ativos / Inativos / Fora do catálogo) e coluna "Status
+catálogo". A `BASE CADASTRO COM EAN.xlsx` **não** entrou (perda não tem EAP).
+Os 2 xlsx saíram do versionamento (`.gitignore`, dados sensíveis).
 
-| Achado | R$ | Ação |
-|---|---:|---|
-| `Classificação` do catálogo preenche o "sem classificação" atual | **17.865** de 22.039 (299 SKUs) | **integrar** — parte vira medicamento (uso contínuo, controlado, RX) |
-| Vencido de itens `Status = Inativo` no catálogo | 2.963 | pouco; vira só um **filtro ativo/inativo** |
-| Vencido de itens fora de qualquer base | 4.174 (40 SKUs) | resíduo, deixar como "fora do cadastro" |
-
-- `BASE CADASTRO COM GRUPOS.xlsx`: 44.707 linhas, **nível de catálogo (sem loja)**.
-  Colunas úteis: `Status` (Ativo 22.335 / Inativo 22.372), `Descrição` (chave de
-  join, única), `Código`, `Classificação` (ARVORE NOVA > ...), `Curva Valor`,
-  `Curva Qtd.`, `Princípio Ativo`, `Uso Contínuo`, `Fabricante`.
-- `BASE CADASTRO COM EAN.xlsx`: 58.249 linhas, `Código de Barras` ↔ `Produto`
-  ↔ preço. **Não serve pro join da perda** (relatório de perdas não tem EAN);
-  só serviria pra casar catálogo ↔ DADOS.
-- Plano: `core.load_catalogo(grupos)` keyed por `produto` (upper/strip). Em
-  `enriquecer_vencidos`, após o merge `(loja,produto)` com o DADOS, um
-  `.merge(catалogo, on="produto", how="left")` e coalescer `classif` /
-  `curva_valor` / `curva_qtd`; adicionar `status_cadastro`. **DADOS continua
-  sendo a base operacional** (giro/mvm/estoque) — o catálogo só enriquece.
-- Cobertura de produtos do vencido: DADOS 97% · catálogo 99%.
+Efeito real medido (vencido jan–set): "sem classificação" R$ 22.039 → **R$ 4.174**
+(residual "fora do catálogo"); os R$ 17.865 / 299 SKUs classificados foram para
+medicamento (219.827 → **231.003**) e não-medicamento (146.589 → **153.278**).
+Vencido de itens `Status = Inativo`: ~R$ 2,8 mil.
 
 ### 1. Faturamento de setembro/2026
 `faturamento.csv` vai até **2026-08**. Setembro ainda não fechou (dado de perda
@@ -65,6 +57,19 @@ Enquanto não conectar, dados do Power BI entram por print/export manual.
 ---
 
 ## FEITO NESTA SESSÃO (2026-09-10)
+
+### Commit `9268722` — Catálogo BASE CADASTRO COM GRUPOS na Anatomia (item 0d)
+`core.load_catalogo(sources)` lê a BASE CADASTRO COM GRUPOS (nível produto, sem
+loja), chave = `Descrição` normalizada (`_norm_produto` = `_ascii`), dedup por
+produto (Ativo vence Inativo), cache parquet próprio (`_cache_path(..., "catalogo")`).
+`enriquecer_vencidos(..., catalogo=None)`: após o merge `(loja, produto)` com o
+DADOS, merge extra por descrição normalizada + `_coalesce` de `classif` /
+`curva_valor` / `curva_qtd` (DADOS tem prioridade). `sem_cadastro` continua sinal
+do DADOS (fixado antes do coalesce). Novo `status_cadastro`. `_vclass` recebe
+`cat_sig` + `_cat_df`; `CTX` expõe `catalogo`/`catsig`. `_catalogo` cache +
+auto-find `*GRUPOS*.xlsx` + uploader. Anatomia: radio "Status no catálogo" +
+coluna "Status catálogo". `BASE CADASTRO COM EAN.xlsx` não usado. Os 2 xlsx
+saíram do versionamento (`.gitignore`).
 
 ### Commit `3c38334` — Anatomia com seletor de motivo (item 0c)
 `_vclass(perdas_sig, cad_sig, cats, _perdas, _cad)` — `cats` entra na chave do
