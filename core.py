@@ -362,6 +362,96 @@ def load_catalogo(sources, use_cache: bool = True) -> pd.DataFrame:
 
 
 # ----------------------------------------------------------------------------- #
+# 3b. itens a vencer (estoque atual com lote/validade, por loja)
+# ----------------------------------------------------------------------------- #
+_AVENCER_MAP = [
+    ("loja",          lambda n: "NEG" in n and "CODIGO" in n),
+    ("loja_nome",     lambda n: "NEG" in n and "NOME" in n),
+    ("status",        lambda n: n == "STATUS"),
+    ("produto",       lambda n: n == "EMBALAGEM"),
+    ("lote",          lambda n: n == "LOTE"),
+    ("estoque_atual", lambda n: n == "ESTOQUE ATUAL"),
+    ("dias_venc",     lambda n: "DIAS" in n and "VENCIMENTO" in n),
+    ("data_fab",      lambda n: "FABRICA" in n),
+    ("data_validade", lambda n: "VALIDADE" in n),
+    ("fabricante",    lambda n: "FABRICANTE" in n),
+    ("classif",       lambda n: "CLASSIFICACAO" in n),
+    ("curva_qtd",     lambda n: "CURVA" in n and "QUANTIDADE" in n),
+    ("curva_valor",   lambda n: "CURVA" in n and "VALOR" in n),
+    ("mvm",           lambda n: "MEDIA VENDA MENSAL" in n),
+    ("demanda_30d",   lambda n: "DEMANDA" in n),
+    ("cod_barras",    lambda n: "BARRA" in n),
+]
+
+
+def load_itens_a_vencer(source) -> pd.DataFrame:
+    """Relatório de estoque com lote/validade (ERP) -> loja, loja_nome, produto,
+       lote, estoque_atual, dias_venc, data_validade, classif, curva_qtd,
+       curva_valor, mvm, demanda_30d. Só linhas com Status = Ativo."""
+    name = getattr(source, "name", str(source))
+    raw = _read_xlsx(source) if name.lower().endswith(("xlsx", "xlsm")) else pd.read_csv(source)
+    ren = {}
+    for c in raw.columns:
+        n = _ascii(c)
+        for dest, test in _AVENCER_MAP:
+            if dest not in ren.values() and test(n):
+                ren[c] = dest
+                break
+    raw = raw.rename(columns=ren)
+    need = {"loja", "produto", "estoque_atual", "dias_venc", "data_validade"}
+    missing = need - set(raw.columns)
+    if missing:
+        raise ValueError(f"Relatório de itens a vencer sem as colunas {missing}. "
+                         f"Colunas lidas: {list(raw.columns)}")
+    keep = [c for c in raw.columns if c in {d for d, _ in _AVENCER_MAP}]
+    av = raw[keep].copy()
+    if "status" in av.columns:
+        av = av[av["status"].astype(str).str.strip().str.casefold() == "ativo"]
+    av["loja"] = pd.to_numeric(av["loja"], errors="coerce")
+    av["produto"] = av["produto"].astype(str).str.strip()
+    for c in ("estoque_atual", "dias_venc", "mvm", "demanda_30d"):
+        if c in av.columns:
+            av[c] = pd.to_numeric(av[c], errors="coerce")
+    av["data_validade"] = pd.to_datetime(av["data_validade"], errors="coerce")
+    av = av.dropna(subset=["loja", "produto"])
+    return av.reset_index(drop=True)
+
+
+def enriquecer_a_vencer(av: pd.DataFrame, cad: pd.DataFrame | None) -> pd.DataFrame:
+    """Cruza itens a vencer com o cadastro (loja, produto) só para trazer custo
+    médio; estima valor_exposto = estoque atual (não-negativo) x custo médio."""
+    m = av.copy()
+    if cad is not None and not cad.empty and "custo_medio" in cad.columns:
+        m = m.merge(cad[["loja", "produto", "custo_medio"]], on=["loja", "produto"],
+                    how="left")
+    else:
+        m["custo_medio"] = pd.NA
+    m["estoque_pos"] = m["estoque_atual"].clip(lower=0)
+    m["valor_exposto"] = m["estoque_pos"] * m["custo_medio"]
+    m["macro"] = m["classif"].map(macro_categoria) if "classif" in m.columns else "sem classificacao"
+
+    def _faixa_urgencia(d):
+        if pd.isna(d):
+            return "Sem data"
+        if d <= 30:
+            return "Até 30 dias"
+        if d <= 60:
+            return "31 a 60 dias"
+        if d <= 90:
+            return "61 a 90 dias"
+        if d <= 180:
+            return "91 a 180 dias"
+        return "Mais de 180 dias"
+
+    m["urgencia"] = m["dias_venc"].map(_faixa_urgencia)
+    return m
+
+
+ORDEM_URGENCIA = ["Até 30 dias", "31 a 60 dias", "61 a 90 dias", "91 a 180 dias",
+                  "Mais de 180 dias", "Sem data"]
+
+
+# ----------------------------------------------------------------------------- #
 # 4. carga do faturamento
 # ----------------------------------------------------------------------------- #
 _MES_ABBR = {m: f"{i:02d}" for i, m in enumerate(

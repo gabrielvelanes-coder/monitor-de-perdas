@@ -1,5 +1,70 @@
 # Pendências e histórico — Monitor de Perdas
 
+## CONCLUÍDO NESTA SESSÃO (2026-09-11)
+
+Lista de mudanças pedida pelo Gabriel, feita em lote (commit `22414b1` + o
+commit do "Itens a vencer" logo abaixo).
+
+**Simplificação geral.** Barra lateral perdeu as seções "Filtros" (Lojas/
+Período globais) e "Parâmetros" (Escopo/Meta/DEP) — viraram constantes fixas
+no topo do `app.py` (`ESCOPO_PADRAO = "vencido"`, `META_PADRAO = 0.004`,
+`incluir_dep = False`). Cada tela mantém seu filtro local de loja/mês
+(`_loja_local`/`_mes_local`), só o filtro *global* saiu. `st.navigation` perdeu
+"Evitável x estrutural" e "Regras e simulação" do menu (funções continuam no
+arquivo, comentadas na lista — reativa descomentando 2 linhas).
+
+**Anatomia da perda — 3 simplificações:**
+- Removido o filtro **"Status no catálogo"** (Ativos/Inativos/Fora do
+  catálogo) que ficava no topo — junto com o aviso de "quanto foi escondido".
+- Removido o seletor **Curva de valor / Curva de quantidade** — agora só
+  existe curva de quantidade (era o que o Gabriel queria acompanhar). Gráfico
+  "Curva" (que mostrava A…I) virou **2 barras**: `_grupo_giro()` classifica
+  A–H = "Com giro", I = "Sem giro" (+ "Sem cadastro"). Coluna "Curva valor"
+  saiu da tabela de produtos.
+- Gráfico "Quanto tempo parado quando venceu" → renomeado **"Tempo da última
+  venda"**; `_grupo_tempo()` simplifica os 7 baldes antigos (`core.FAIXAS_GIRO`)
+  em 3: **Até 90 dias / Até 180 dias / Acima de 180 dias** (+ "Sem cadastro").
+  A interatividade clique-no-gráfico-filtra-tabela (já existia pros 3 gráficos)
+  foi migrada pros novos campos (`giro_grupo`, `tempo_grupo`).
+
+**Tabela "Todos os motivos no recorte":** coluna **"No escopo"** removida (o
+gráfico ao lado ainda colore por dentro/fora do escopo, só a coluna da tabela
+saiu). Números formatados em pt-BR de verdade (`BRLc()`/`NUM()` novos no
+`app.py` — milhar com ponto, decimal com vírgula) em vez do `NumberColumn`
+padrão do Streamlit (que não tem separador de milhar).
+
+**Textos removidos** entre gráficos/tabelas na Anatomia (o "clique numa barra
+pra filtrar", o "ignora o filtro de escopo/status", o "as lojas são número...",
+o "uma linha por produto e motivo...") — quando a informação valia a pena,
+virou `help=` (tooltip) de um metric em vez de texto solto na tela.
+
+**Bug corrigido:** "Gap vs meta" mostrava `+0,13 p,p,` (a troca de separador
+`.`→`,` também comia a abreviação "p.p."). Agora troca só o número.
+
+### Itens a vencer — nova tela, com dado real
+O Gabriel mandou `itens a vencer out26.xlsx` (relatório do ERP: estoque atual
+com lote e validade, por loja — 4.249 linhas, 23 lojas, `Status` sempre
+"Ativo", `Dias até vencimento` de 20 a 1538). Copiado pra
+`PERDAS\itens a vencer.xlsx` (fora do git, como os outros dados).
+
+`core.py`: `load_itens_a_vencer(source)` (mapa de colunas `_AVENCER_MAP`, só
+`Status = Ativo`) + `enriquecer_a_vencer(av, cad)` (merge por loja+produto só
+pra trazer `custo_medio`; `valor_exposto = estoque_atual.clip(0) × custo_medio`;
+`macro` via `macro_categoria(classif)` reaproveitado; `urgencia` em 5 faixas —
+`ORDEM_URGENCIA` = Até 30 / 31-60 / 61-90 / 91-180 / Mais de 180 dias / Sem
+data). `app.py`: `_a_vencer` cache + auto-detect (`itens*a*vencer*.xls*`) +
+uploader; `tela_itens_a_vencer()` substituiu o placeholder — KPIs (valor
+exposto total, ≤30d, ≤90d, unidades), gráfico por urgência, gráfico por loja,
+tabela (produto/lote/estoque/dias/validade/curva/categoria) + CSV.
+
+Números (23 lojas, cadastro casou 98,3%): **R$ 396.050 de estoque exposto**,
+R$ 83.985 vence em ≤30 dias, R$ 284.477 em ≤90 dias. Medicamento R$ 195.243 /
+não-medicamento R$ 200.806 (bem mais equilibrado que o vencido histórico —
+faz sentido, isso é o mix de estoque, não o mix do que já foi perdido). Loja
+com mais valor exposto: **13** (diferente do ranking histórico de vencido,
+onde 20 lidera) — vale olhar se é fruto de uma compra/transferência recente
+que ainda dá tempo de agir.
+
 ## PENDENTE
 
 ### 1. Faturamento de setembro/2026 — ÚNICA PENDÊNCIA ABERTA

@@ -4,25 +4,32 @@ Dashboard Streamlit para acompanhar a **taxa de perdas por mês** (perda ÷
 faturamento), separar o que é perda de verdade do que não é, e diagnosticar de
 onde vem o vencimento cruzando com curva / giro / estoque / catálogo.
 
-## As 5 telas (`st.navigation`)
+## As telas (`st.navigation`)
+
+Visíveis no menu:
 
 | Tela | Pergunta que responde |
 |---|---|
 | **Painel** | A perda é aceitável? 4 KPIs (faturamento · perda no escopo · taxa ponderada · gap vs meta), semáforo + diagnóstico automático, evolução mensal vs meta, ranking de lojas por taxa, bridge de escopo, top motivos. |
 | **Motivos** | O que é o quê? De-para de cada motivo de baixa: R$, % do faturamento, % do lançado, e se é perda de verdade (Vencido / Outra perda real / Não é perda). Explica a diferença entre a taxa da ferramenta e o `%perda/fat` do Power BI. |
-| **Anatomia da perda** | O que são esses itens? Abre em **Todos os motivos** e traz um bloco fixo "Todos os motivos no recorte" (R$/unid/linhas/produtos por motivo, marcando o que está na análise). Escopo Vencido / Perda real / Todos + motivos específicos. Medicamento × não-medicamento × sem classificação, por categoria da árvore, por curva (A…I), por tempo parado ao vencer. Filtro por status no catálogo (com aviso do que é escondido). Gráficos clicáveis filtram a tabela; a tabela é uma linha por produto **e motivo**. |
-| **Evitável × estrutural** | Estou dando perda em item que vende? 4 baldes — PDV / excesso de compra / item suspenso / fora do mix — com ação por item e ranking de lojas. |
-| **Regras e simulação** | O que mudar e quanto economiza. Simula teto de estoque por curva/categoria e estima a economia/mês. |
+| **Anatomia da perda** | O que são esses itens? Abre em **Todos os motivos** e traz um bloco fixo "Todos os motivos no recorte" (R$/unid/linhas/produtos por motivo). Escopo Vencido / Perda real / Todos + motivos específicos. Medicamento × não-medicamento × sem classificação, por categoria da árvore, por curva de quantidade (**Com giro A–H** / **Sem giro I**), por **tempo da última venda** (até 90 / até 180 / acima de 180 dias). Os 3 gráficos são clicáveis e filtram a tabela de produtos (uma linha por produto **e motivo**). |
+| **Itens a vencer** | Estoque **atual** (não histórico) com data de validade, por loja — para agir antes de virar perda. KPIs de valor exposto por urgência (≤30 / ≤90 dias), gráfico por urgência e por loja, tabela com lote/validade/curva. Cruza com o DADOS só para trazer custo médio (valor = estoque × custo). |
+
+Ocultas do menu (código continua em `app.py`, é só remover o comentário de
+`st.navigation` para reativar): **Evitável × estrutural** (4 baldes — PDV /
+excesso de compra / item suspenso / fora do mix — com ação por item) e
+**Regras e simulação** (simula teto de estoque por curva/categoria e estima
+economia/mês).
 
 ## Filtros
 
-- **Global (barra lateral):** `Lojas` + `Período (meses)`, vazio = tudo. Vale para
-  todas as telas — é aplicado em `perdas`/`fat` antes de qualquer cálculo.
-- **Por tela:** cada tela tem `Meses (nesta tela)` + `Lojas (nesta tela)` que
-  restringem ainda mais dentro do recorte global (somem quando o recorte já tem
-  ≤ 1 mês / 1 loja).
-- **Parâmetros (barra lateral):** Escopo (Somente vencidos / Perda real / Todos os
-  motivos), Meta (default **0,40 %** do faturamento), Incluir depósito (DEP).
+- **Por tela:** cada tela tem `Meses (nesta tela)` + `Lojas (nesta tela)`
+  (Painel/Motivos/Anatomia) — some quando o recorte já tem ≤ 1 mês/loja. A
+  Anatomia também tem seu próprio seletor de **Motivos** (Vencido / Perda real
+  / Todos / específicos).
+- **Sem filtro global na barra lateral** (removido a pedido em 2026-09-11) —
+  escopo, meta e "incluir depósito" ficam fixos no código (`ESCOPO_PADRAO`,
+  `META_PADRAO` = 0,40 %, sem DEP) em vez de widgets.
 
 ## Por que existe
 
@@ -72,6 +79,7 @@ servidor. `iniciar.bat` faz o duplo-clique. Python usado:
 | 2 | `DADOS *.xlsx` | Cadastro **por loja**: curva, média de venda, dias sem vender, estoque, motivo de suspensão. Um ou vários arquivos. Base operacional (giro/mvm/estoque) — habilita Anatomia / Evitável / Regras. |
 | 3 | `BASE CADASTRO COM GRUPOS.xlsx` | Catálogo **nível produto** (sem loja): `Classificação` (árvore), `Curva Valor`/`Qtd.`, `Status` (Ativo/Inativo). **Só enriquece** — preenche `classif`/`curva` que faltam no DADOS. Opcional. |
 | 4 | `faturamento.csv` | Faturamento por loja e mês. Sem ele os valores aparecem em R$, mas não em %. |
+| 5 | `itens a vencer.xlsx` | Estoque **atual** com lote/validade, por loja (relatório do ERP: *controle de validade* / *produtos a vencer*). Opcional — habilita a tela **Itens a vencer**. |
 
 `BASE CADASTRO COM EAN.xlsx` **não é usada** (o relatório de perdas não tem EAN).
 

@@ -87,6 +87,11 @@ def _fat_arquivo(path, mtime):
     return core.load_faturamento(path)
 
 
+@st.cache_data(show_spinner="Lendo itens a vencer…")
+def _a_vencer(path, mtime):
+    return core.load_itens_a_vencer(path)
+
+
 @st.cache_data(show_spinner="Cruzando com o cadastro…")
 def _vclass(perdas_sig, cad_sig, cat_sig, cats, _perdas_df, _cad_df, _cat_df):
     enr = core.enriquecer_vencidos(_perdas_df, _cad_df, tuple(cats), catalogo=_cat_df)
@@ -115,6 +120,7 @@ def build_context() -> dict:
         up_cat = st.file_uploader("Catálogo — BASE CADASTRO COM GRUPOS (.xlsx)",
                                   type=["xlsx"])
         up_f = st.file_uploader("Faturamento (.csv/.xlsx)", type=["csv", "xlsx"])
+        up_av = st.file_uploader("Itens a vencer (.xlsx/.csv)", type=["xlsx", "csv"])
 
     # perdas (obrigatório)
     auto_p = _achar("perdas*.xls", "perdas*.xlsx", "*Baixa*Estoque*.xls*")
@@ -156,6 +162,15 @@ def build_context() -> dict:
         fat = _fat_arquivo(auto_f[0], Path(auto_f[0]).stat().st_mtime)
     elif FAT_JSON.exists():
         fat = pd.DataFrame(json.loads(FAT_JSON.read_text(encoding="utf-8")))
+
+    # itens a vencer (opcional) — estoque atual com lote/validade, por loja
+    auto_av = _achar("itens*a*vencer*.xls*", "*a vencer*.xls*", "*validade*.xls*")
+    itens_a_vencer, fonte_av = None, None
+    if up_av is not None:
+        itens_a_vencer, fonte_av = core.load_itens_a_vencer(up_av), up_av.name
+    elif auto_av:
+        itens_a_vencer = _a_vencer(auto_av[0], Path(auto_av[0]).stat().st_mtime)
+        fonte_av = Path(auto_av[0]).name
 
     # filtros e parâmetros globais saíram da barra lateral a pedido do usuário
     # (2026-09-11) — ficam fixos aqui; cada tela mantém seu próprio filtro
@@ -200,7 +215,8 @@ def build_context() -> dict:
                 fat=fat_f, fonte=fonte, escopo=escopo, meta=meta,
                 incluir_dep=incluir_dep, taxa_lm=taxa_lm, mensal=mensal, cob=cob,
                 vclass=vclass, n_meses=n_meses_perda, lojas_sel=lojas_sel,
-                meses_sel=meses_sel, psig=psig, csig=csig, catsig=catsig)
+                meses_sel=meses_sel, psig=psig, csig=csig, catsig=catsig,
+                itens_a_vencer=itens_a_vencer, fonte_av=fonte_av)
 
 
 def _editor_faturamento(perdas, fat):
@@ -1096,27 +1112,106 @@ def tela_regras():
 
 
 # =========================================================================== #
-# TELA — ITENS A VENCER, POR LOJA  (placeholder — aguarda relatório de validade)
+# TELA — ITENS A VENCER, POR LOJA
 # =========================================================================== #
 def tela_itens_a_vencer():
-    st.title("Itens a vencer, por loja")
-    st.caption("Estoque atual que vai vencer em breve — para agir antes da perda "
-               "acontecer (transferir, promover, devolver), em vez de só medir "
-               "depois de já ter vencido.")
-    st.info(
-        "Ainda não tenho um relatório com **data de validade/lote por item e loja**. "
-        "O que já foi enviado (perdas = histórico de baixa; DADOS/cadastro = curva e "
-        "giro) não traz validade — só dá pra saber o que **já venceu**, não o que "
-        "**vai vencer**.\n\n"
-        "Envie um relatório do tipo *controle de validade* / *produtos a vencer* do "
-        "ERP, com colunas de loja, produto, lote, data de validade e quantidade em "
-        "estoque, que eu ligo essa tela.",
-        icon=":material/hourglass_empty:")
-    st.file_uploader("Relatório de itens a vencer (.xls/.xlsx/.csv)",
-                     type=["xls", "xlsx", "csv"], key="up_a_vencer",
-                     help="Ainda não processado — assim que o formato for definido, "
-                          "esta tela passa a mostrar itens a vencer por loja, "
-                          "com prioridade por valor e por dias restantes.")
+    st.title("Itens a vencer")
+    av = CTX["itens_a_vencer"]
+    if av is None or av.empty:
+        st.info(
+            "Nenhum relatório de itens a vencer carregado. Envie um relatório do "
+            "ERP (*controle de validade* / *produtos a vencer*) com loja, produto, "
+            "lote, data de validade e estoque, na barra lateral.",
+            icon=":material/hourglass_empty:")
+        return
+    st.caption(f"Estoque atual, por data de validade — para agir antes da perda "
+               f"acontecer · fonte `{CTX['fonte_av']}`")
+
+    enr = core.enriquecer_a_vencer(av, CTX["cad"])
+    if CTX["cad"] is None:
+        st.caption(":material/info: Sem cadastro (DADOS) carregado — mostrando só "
+                   "unidades, sem valor em R$ (falta o custo médio por loja/produto).")
+
+    c_loja, c_urg = st.columns(2)
+    lojas = sorted(int(x) for x in enr["loja"].dropna().unique())
+    lsel = c_loja.multiselect("Lojas", lojas, default=[], key="av_lojas",
+                              placeholder="todas as lojas")
+    if lsel:
+        enr = enr[enr["loja"].isin(lsel)]
+    urg_sel = c_urg.multiselect("Urgência", core.ORDEM_URGENCIA, default=[],
+                                key="av_urgencia", placeholder="todas as faixas")
+    if urg_sel:
+        enr = enr[enr["urgencia"].isin(urg_sel)]
+    if enr.empty:
+        st.info("Sem itens nesse recorte.", icon=":material/info:")
+        return
+
+    tem_valor = enr["valor_exposto"].notna().any()
+    tot_valor = enr["valor_exposto"].sum()
+    tot_estoque = enr["estoque_pos"].sum()
+    ate_30 = enr.loc[enr["urgencia"] == "Até 30 dias", "valor_exposto"].sum()
+    ate_90 = enr.loc[enr["urgencia"].isin(["Até 30 dias", "31 a 60 dias", "61 a 90 dias"]),
+                     "valor_exposto"].sum()
+    with st.container(horizontal=True):
+        st.metric("Estoque exposto (valor)", BRLc(tot_valor) if tem_valor else NUM(tot_estoque),
+                  delta=f"{NUM(len(enr))} lotes · {NUM(enr['produto'].nunique())} produtos",
+                  delta_color="off", border=True)
+        st.metric("Vence em até 30 dias", BRLc(ate_30) if tem_valor else "—", border=True)
+        st.metric("Vence em até 90 dias", BRLc(ate_90) if tem_valor else "—", border=True)
+        st.metric("Unidades em risco", NUM(tot_estoque), border=True)
+
+    left, right = st.columns(2)
+    with left:
+        with st.container(border=True):
+            st.markdown("**Por urgência**")
+            mcol = "valor_exposto" if tem_valor else "estoque_pos"
+            mtitle = "R$ exposto" if tem_valor else "Unidades"
+            g = (enr.groupby("urgencia", as_index=False)
+                 .agg(valor_exposto=("valor_exposto", "sum"), estoque_pos=("estoque_pos", "sum")))
+            ch = alt.Chart(g).mark_bar(color="#FBBF24").encode(
+                x=alt.X(f"{mcol}:Q", title=mtitle),
+                y=alt.Y("urgencia:N", sort=core.ORDEM_URGENCIA, title=None),
+                tooltip=["urgencia", alt.Tooltip("valor_exposto:Q", format=",.0f"),
+                         alt.Tooltip("estoque_pos:Q", format=",.0f")])
+            lbl = alt.Chart(g).mark_text(align="left", dx=4, color="#CBD5E1",
+                                        fontSize=11).encode(
+                x=f"{mcol}:Q", y=alt.Y("urgencia:N", sort=core.ORDEM_URGENCIA),
+                text=alt.Text(f"{mcol}:Q", format=",.0f"))
+            st.altair_chart(ch + lbl, width="stretch")
+    with right:
+        with st.container(border=True):
+            st.markdown("**Por loja**")
+            gl = (enr.groupby("loja", as_index=False)
+                  .agg(valor_exposto=("valor_exposto", "sum"), estoque_pos=("estoque_pos", "sum")))
+            gl["loja"] = gl["loja"].astype("Int64").astype(str)
+            ordem_loja = gl.sort_values(mcol, ascending=False)["loja"].tolist()
+            ch = alt.Chart(gl).mark_bar(color="#60A5FA").encode(
+                x=alt.X(f"{mcol}:Q", title=mtitle),
+                y=alt.Y("loja:N", sort=ordem_loja, title="Loja"),
+                tooltip=["loja", alt.Tooltip("valor_exposto:Q", format=",.0f"),
+                         alt.Tooltip("estoque_pos:Q", format=",.0f")])
+            st.altair_chart(ch, width="stretch")
+
+    with st.container(border=True):
+        st.markdown(f"**Itens** — {NUM(len(enr))} lotes · "
+                    f"{BRLc(tot_valor) if tem_valor else NUM(tot_estoque) + ' unidades'}")
+        cols = ["loja", "produto", "lote", "estoque_atual", "dias_venc", "data_validade",
+                "urgencia", "curva_qtd", "macro"]
+        if tem_valor:
+            cols.insert(4, "valor_exposto")
+        tab = (enr[cols].sort_values(
+            "valor_exposto" if tem_valor else "estoque_atual", ascending=False)
+            .head(500).reset_index(drop=True))
+        cfg = {"loja": "Loja", "produto": "Produto", "lote": "Lote",
+               "estoque_atual": "Estoque", "dias_venc": "Dias p/ vencer",
+               "data_validade": st.column_config.DateColumn("Validade", format="DD/MM/YYYY"),
+               "urgencia": "Urgência", "curva_qtd": "Curva", "macro": "Categoria",
+               "valor_exposto": st.column_config.NumberColumn("R$ exposto", format="R$ %.0f")}
+        st.dataframe(tab, hide_index=True, width="stretch", height=380, column_config=cfg)
+        if len(enr) > 500:
+            st.caption(f"Mostrando as 500 maiores de {len(enr)} linhas — o CSV traz todas.")
+        st.download_button("Baixar (CSV)", enr.to_csv(index=False).encode("utf-8-sig"),
+                           "itens_a_vencer.csv", "text/csv", icon=":material/download:")
 
 
 # --------------------------------------------------------------------------- #

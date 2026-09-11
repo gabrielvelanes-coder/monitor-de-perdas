@@ -12,6 +12,7 @@ perdas*.xlsx
 faturamento.csv
 faturamento.xlsx
 faturamento.json
+*itens*a*vencer*.xls*
 *.parquet
 
 
