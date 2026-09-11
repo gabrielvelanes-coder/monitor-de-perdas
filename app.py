@@ -35,6 +35,23 @@ COR = {"ok": "#34D399", "atencao": "#FBBF24", "critico": "#F87171", "sem_dados":
 COR_BALDE = {"pdv": "#34D399", "compra": "#FB923C", "cadastro": "#F87171", "sem_cadastro": "#94A3B8"}
 CLASSE_COR = {"Vencido": "#F87171", "Outra perda real": "#FB923C", "Não é perda": "#94A3B8"}
 
+ESCOPO_PADRAO = "vencido"
+META_PADRAO = 0.004  # 0,40% do faturamento
+
+
+def BRLc(v) -> str:
+    """R$ 1.234 — inteiro, separador de milhar '.', pt-BR."""
+    if pd.isna(v):
+        return "—"
+    return "R$ " + f"{v:,.0f}".replace(",", ".")
+
+
+def NUM(v) -> str:
+    """1.234 — inteiro pt-BR, sem prefixo."""
+    if pd.isna(v):
+        return "—"
+    return f"{v:,.0f}".replace(",", ".")
+
 
 def _cor_taxa(taxa: float, meta: float) -> str:
     """Semáforo de uma taxa contra a meta (mesma régua de frase_diagnostico)."""
@@ -140,24 +157,14 @@ def build_context() -> dict:
     elif FAT_JSON.exists():
         fat = pd.DataFrame(json.loads(FAT_JSON.read_text(encoding="utf-8")))
 
-    # filtros globais — saem de dentro das telas e valem para todas
-    st.sidebar.markdown("### Filtros")
-    lojas_all = sorted(int(x) for x in
-                       perdas.loc[~perdas["is_dep"], "loja"].dropna().unique())
-    meses_all = sorted(perdas["ano_mes"].unique())
-    lojas_sel = st.sidebar.multiselect("Lojas", lojas_all, default=[],
-                                       placeholder="todas as lojas", key="g_lojas")
-    meses_sel = st.sidebar.multiselect("Período (meses)", meses_all, default=[],
-                                       placeholder="todo o período", key="g_meses")
-
-    # parâmetros
-    st.sidebar.markdown("### Parâmetros")
-    escopo = st.sidebar.segmented_control(
-        "Escopo", list(core.ESCOPOS), format_func=lambda k: core.ESCOPOS[k].split(" (")[0],
-        default="vencido", selection_mode="single") or "vencido"
-    meta = st.sidebar.slider("Meta (% do faturamento)", 0.1, 1.5, 0.40, 0.05,
-                             format="%.2f%%") / 100
-    incluir_dep = st.sidebar.toggle("Incluir depósito (DEP)", value=False)
+    # filtros e parâmetros globais saíram da barra lateral a pedido do usuário
+    # (2026-09-11) — ficam fixos aqui; cada tela mantém seu próprio filtro
+    # local de loja/mês (_loja_local / _mes_local).
+    lojas_sel: list[int] = []
+    meses_sel: list[str] = []
+    escopo = ESCOPO_PADRAO
+    meta = META_PADRAO
+    incluir_dep = False
 
     with st.sidebar.expander("Digitar faturamento", icon=":material/edit:"):
         _editor_faturamento(perdas, fat)
@@ -363,7 +370,7 @@ def tela_veredito():
                   help=f"Motivos no escopo '{core.ESCOPOS[esc].split(' (')[0]}'.")
         st.metric("Taxa de perdas", PCT(taxa_pond), border=True,
                   help="Ponderada: perda total ÷ faturamento total do recorte.")
-        st.metric("Gap vs meta", f"{gap_pp:+.2f} p.p.".replace(".", ","),
+        st.metric("Gap vs meta", f"{gap_pp:+.2f}".replace(".", ",") + " p.p.",
                   delta=f"meta {PCT(meta)}", delta_color="off", border=True)
 
     # ---- diagnóstico (semáforo + frase) ------------------------------- #
@@ -644,12 +651,35 @@ def _picked(event, field):
 MACRO_ROT = {"medicamento": "Medicamento", "nao-medicamento": "Não-medicamento",
              "sem classificacao": "Sem classificação"}
 ORD_LETRA = list("ABCDEFGHI") + ["Sem cadastro"]
+ORD_GIRO = ["Com giro (A–H)", "Sem giro (I)", "Sem cadastro"]
+ORD_TEMPO = ["Até 90 dias", "Até 180 dias", "Acima de 180 dias", "Sem cadastro"]
 
 
 def _cletra(s) -> str:
     """Letra da curva (A…I) ou 'Sem cadastro'."""
     x = str(s).strip().upper()
     return x if x in set("ABCDEFGHI") else "Sem cadastro"
+
+
+def _grupo_giro(s) -> str:
+    """Curva de quantidade simplificada: A–H = tem giro; I = sem giro."""
+    x = str(s).strip().upper()
+    if x in set("ABCDEFGH"):
+        return "Com giro (A–H)"
+    if x == "I":
+        return "Sem giro (I)"
+    return "Sem cadastro"
+
+
+def _grupo_tempo(dias) -> str:
+    """Tempo da última venda, simplificado em 3 faixas."""
+    if pd.isna(dias):
+        return "Sem cadastro"
+    if dias <= 90:
+        return "Até 90 dias"
+    if dias <= 180:
+        return "Até 180 dias"
+    return "Acima de 180 dias"
 
 
 def tela_anatomia():
@@ -688,31 +718,7 @@ def tela_anatomia():
     if lsel:
         vc = vc[vc["loja"].isin(lsel)]
 
-    # filtro por status no catálogo (só quando o catálogo está carregado)
     tem_cat = CTX["catalogo"] is not None and "status_cadastro" in vc.columns
-    stat = "Todos"
-    vc_pre_status = vc
-    if tem_cat:
-        _s = vc["status_cadastro"].astype(str).str.strip().str.lower()
-        fora_cat = vc["status_cadastro"].isna() | _s.isin(["", "nan", "none"])
-        stat = st.radio("Status no catálogo",
-                        ["Todos", "Ativos", "Inativos", "Fora do catálogo"],
-                        horizontal=True, key="anat_status",
-                        help="Status do produto na BASE CADASTRO COM GRUPOS. "
-                             "≠ 'Todos' esconde itens — inclusive os que não casaram "
-                             "com o catálogo.")
-        if stat == "Ativos":
-            vc = vc[_s.eq("ativo")]
-        elif stat == "Inativos":
-            vc = vc[_s.eq("inativo")]
-        elif stat == "Fora do catálogo":
-            vc = vc[fora_cat]
-    oculto_status = vc_pre_status["valor_total"].sum() - vc["valor_total"].sum()
-    if stat != "Todos" and oculto_status > 0.5:
-        st.warning(
-            f"**Status no catálogo = {stat}** escondeu {BRL(oculto_status)} "
-            f"({len(vc_pre_status) - len(vc)} linhas). Volte para **Todos** para ver "
-            "o recorte inteiro.", icon=":material/visibility_off:")
 
     if vc.empty:
         st.info(f"Sem baixas de \"{mot_curto}\" nesse recorte.", icon=":material/info:")
@@ -732,15 +738,15 @@ def tela_anatomia():
                   delta=f"{und_real:,} unid · {len(vc):,} linhas".replace(",", "."),
                   delta_color="off", border=True)
         for _, r in macro.iterrows():
+            ajuda = None
+            if r["macro"] == "sem classificacao":
+                ajuda = ("Item sem `classif` no cadastro — não cai em medicamento nem "
+                         "não-medicamento. Escolha \"Só sem classificação\" no seletor "
+                         "Ver para listá-los na tabela do fim da página.")
             st.metric(MACRO_ROT.get(r["macro"], r["macro"].capitalize()),
                       BRL(r["valor_total"]),
-                      delta=f"{r['pct']*100:.0f}% {unidade}", delta_color="off", border=True)
-    sc = macro.loc[macro["macro"] == "sem classificacao", "valor_total"].sum()
-    if sc:
-        st.caption(f":material/help: **Sem classificação** = {BRL(sc)} em itens sem "
-                   "`classif` no cadastro (não caem em medicamento nem não-medicamento). "
-                   "Escolha \"Só sem classificação\" no seletor **Ver** para listá-los "
-                   "na tabela do fim da página.")
+                      delta=f"{r['pct']*100:.0f}% {unidade}", delta_color="off",
+                      border=True, help=ajuda)
 
     # ---- TODOS os motivos do recorte (sempre visível, ignora escopo/status) --- #
     vfull = _vclass_recorte(_cats_do_escopo("todos"))
@@ -757,23 +763,22 @@ def tela_anatomia():
     gmot["pct"] = gmot["valor"] / tot_full
     gmot["no_escopo"] = gmot["motivo_label"].map(lambda l: _inv.get(l) in _cats_atuais)
     gmot = gmot.sort_values("valor", ascending=False).reset_index(drop=True)
+    gmot_show = gmot.copy()
+    gmot_show["valor"] = gmot_show["valor"].map(BRLc)
+    gmot_show["unid"] = gmot_show["unid"].map(NUM)
+    gmot_show["linhas"] = gmot_show["linhas"].map(NUM)
+    gmot_show["produtos"] = gmot_show["produtos"].map(NUM)
+    gmot_show["pct"] = gmot_show["pct"].map(PCT)
     with st.container(border=True):
         st.markdown(f"**Todos os motivos no recorte** — {len(gmot)} motivos · "
                     f"{BRL(vfull['valor_total'].sum())} no total")
-        st.caption("Ignora o filtro de escopo/status acima — é a foto completa da "
-                   "loja/mês. **No escopo** = está entrando na análise abaixo.")
         c_tb, c_gr = st.columns([3, 2])
         c_tb.dataframe(
-            gmot[["motivo_label", "valor", "unid", "linhas", "produtos", "pct",
-                  "no_escopo"]],
+            gmot_show[["motivo_label", "valor", "unid", "linhas", "produtos", "pct"]],
             hide_index=True, width="stretch",
             column_config={
-                "motivo_label": "Motivo",
-                "valor": st.column_config.NumberColumn("R$", format="R$ %.0f"),
-                "unid": st.column_config.NumberColumn("Unidades", format="%.0f"),
-                "linhas": "Linhas", "produtos": "Produtos",
-                "pct": st.column_config.NumberColumn("% do total", format="percent"),
-                "no_escopo": st.column_config.CheckboxColumn("No escopo")})
+                "motivo_label": "Motivo", "valor": "R$", "unid": "Unidades",
+                "linhas": "Linhas", "produtos": "Produtos", "pct": "% do total"})
         ch_m = alt.Chart(gmot).mark_bar().encode(
             x=alt.X("valor:Q", title="R$"),
             y=alt.Y("motivo_label:N", sort="-x", title=None),
@@ -791,10 +796,6 @@ def tela_anatomia():
     if "anat_nonce" not in st.session_state:
         st.session_state["anat_nonce"] = 0
     nk = st.session_state["anat_nonce"]
-
-    st.caption("Clique numa barra para filtrar a tabela de produtos no fim da página; "
-               "clique de novo na mesma barra para soltar. Ou use "
-               "\"Limpar filtros dos gráficos\".")
 
     left, right = st.columns(2)
     with left:
@@ -834,37 +835,32 @@ def tela_anatomia():
                                      key=f"anat_ch_cat_{nk}")
     with right:
         with st.container(border=True):
-            h, ctrl = st.columns([3, 2], vertical_alignment="center")
-            h.markdown("**Curva**")
-            qual = ctrl.radio("Curva", ["Valor", "Quantidade"], horizontal=True,
-                              key="anat_curva", label_visibility="collapsed",
-                              help="Curva de valor ou curva de quantidade do cadastro.")
-            col_curva = "curva_qtd" if qual == "Quantidade" else "curva_valor"
-            vc["cletra"] = vc[col_curva].map(_cletra)
-            g = (vc.groupby("cletra", as_index=False)
+            st.markdown("**Curva de quantidade**")
+            vc["giro_grupo"] = vc["curva_qtd"].map(_grupo_giro)
+            g = (vc.groupby("giro_grupo", as_index=False)
                  .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum")))
-            sel_cv = alt.selection_point(fields=["cletra"], name="pcg", toggle="true")
+            sel_cv = alt.selection_point(fields=["giro_grupo"], name="pcg", toggle="true")
             base_cv = alt.Chart(g).encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
-                y=alt.Y("cletra:N", sort=ORD_LETRA, title=None))
+                y=alt.Y("giro_grupo:N", sort=ORD_GIRO, title=None))
             ch = (base_cv.mark_bar(color="#60A5FA").encode(
                 opacity=alt.condition(sel_cv, alt.value(1.0), alt.value(0.35)),
-                tooltip=["cletra", tip_val, tip_itens]).add_params(sel_cv))
+                tooltip=["giro_grupo", tip_val, tip_itens]).add_params(sel_cv))
             lbl_cv = base_cv.mark_text(align="left", dx=4, color="#CBD5E1", fontSize=11).encode(
                 text=alt.Text(f"{mcol}:Q", format=",.0f"))
             ev_cv = st.altair_chart(ch + lbl_cv, width="stretch", on_select="rerun",
                                     key=f"anat_ch_cv_{nk}")
-            st.markdown("**Quanto tempo parado quando venceu**")
-            fg = (vc.groupby("faixa_giro", as_index=False)
+            st.markdown("**Tempo da última venda**")
+            vc["tempo_grupo"] = pd.to_numeric(vc["ult_venda_dias"], errors="coerce").map(_grupo_tempo)
+            fg = (vc.groupby("tempo_grupo", as_index=False)
                   .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum")))
-            ordem_g = [x[2] for x in core.FAIXAS_GIRO] + ["Sem cadastro"]
-            sel_g = alt.selection_point(fields=["faixa_giro"], name="pgiro", toggle="true")
+            sel_g = alt.selection_point(fields=["tempo_grupo"], name="pgiro", toggle="true")
             base_g = alt.Chart(fg).encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
-                y=alt.Y("faixa_giro:N", sort=ordem_g, title=None))
+                y=alt.Y("tempo_grupo:N", sort=ORD_TEMPO, title=None))
             ch2 = (base_g.mark_bar(color="#FB923C").encode(
                 opacity=alt.condition(sel_g, alt.value(1.0), alt.value(0.35)),
-                tooltip=["faixa_giro", tip_val, tip_itens]).add_params(sel_g))
+                tooltip=["tempo_grupo", tip_val, tip_itens]).add_params(sel_g))
             lbl_g = base_g.mark_text(align="left", dx=4, color="#CBD5E1", fontSize=11).encode(
                 text=alt.Text(f"{mcol}:Q", format=",.0f"))
             ev_g = st.altair_chart(ch2 + lbl_g, width="stretch", on_select="rerun",
@@ -877,14 +873,14 @@ def tela_anatomia():
     if cats_sel:
         d = d[d["cat1"].isin(cats_sel)]
         filtros.append(("Categoria", ", ".join(map(str, cats_sel))))
-    cg_sel = _picked(ev_cv, "cletra")
+    cg_sel = _picked(ev_cv, "giro_grupo")
     if cg_sel:
-        d = d[d["cletra"].isin(cg_sel)]
-        filtros.append((f"Curva ({qual.lower()})", ", ".join(map(str, cg_sel))))
-    giro_sel = _picked(ev_g, "faixa_giro")
+        d = d[d["giro_grupo"].isin(cg_sel)]
+        filtros.append(("Curva", ", ".join(map(str, cg_sel))))
+    giro_sel = _picked(ev_g, "tempo_grupo")
     if giro_sel:
-        d = d[d["faixa_giro"].isin(giro_sel)]
-        filtros.append(("Tempo parado", ", ".join(map(str, giro_sel))))
+        d = d[d["tempo_grupo"].isin(giro_sel)]
+        filtros.append(("Tempo da última venda", ", ".join(map(str, giro_sel))))
 
     if filtros and st.button("Limpar filtros dos gráficos",
                              icon=":material/filter_alt_off:", key="anat_clear"):
@@ -896,19 +892,16 @@ def tela_anatomia():
             st.markdown("**Produtos — " +
                         " · ".join(f"{k}: {v}" for k, v in filtros) + "**")
             oculto_g = vc["valor_total"].sum() - d["valor_total"].sum()
-            st.caption(f"{len(d)} linhas · {BRL(d['valor_total'].sum())} · "
-                       f"{d['itens'].sum():,.0f} unidades no filtro dos gráficos. "
-                       f"({BRL(oculto_g)} em {len(vc) - len(d)} linhas fora do filtro.)"
-                       .replace(",", "."))
+            st.caption(f"{len(d)} linhas · {BRLc(d['valor_total'].sum())} · "
+                       f"{NUM(d['itens'].sum())} unidades no filtro dos gráficos "
+                       f"({BRLc(oculto_g)} fora do filtro).")
         else:
             st.markdown(f"**Produtos** — todos os itens de \"{mot_curto}\" no recorte "
                         f"· {BRL(vc['valor_total'].sum())} · {len(vc)} linhas")
-            st.caption("Uma linha por produto **e motivo**. Clique numa barra dos "
-                       "gráficos acima para filtrar; clique nos cabeçalhos para ordenar.")
         agg = dict(valor=("valor_total", "sum"), itens=("itens", "sum"),
-                   curva_valor=("curva_valor", "first"), curva_qtd=("curva_qtd", "first"),
+                   curva_qtd=("curva_qtd", "first"),
                    macro=("macro", "first"), cat=("cat1", "first"),
-                   faixa_giro=("faixa_giro", "first"),
+                   tempo_grupo=("tempo_grupo", "first"),
                    dias_sem_vender=("ult_venda_dias", "max"),
                    n_lojas=("loja", "nunique"),
                    lojas_ids=("loja", lambda s: ", ".join(
@@ -925,9 +918,9 @@ def tela_anatomia():
                          "valor": st.column_config.NumberColumn("Total perda (R$)",
                                                                 format="R$ %.0f"),
                          "itens": st.column_config.NumberColumn("Unidades", format="%.0f"),
-                         "curva_valor": "Curva valor", "curva_qtd": "Curva qtd",
+                         "curva_qtd": "Curva",
                          "macro": "Categoria", "cat": "Árvore nível 1",
-                         "faixa_giro": "Tempo parado",
+                         "tempo_grupo": "Tempo da última venda",
                          "dias_sem_vender": "Dias s/ vender",
                          "n_lojas": "Nº lojas",
                          "lojas_ids": "Lojas (ID)",
@@ -935,8 +928,6 @@ def tela_anatomia():
         if len(tab_full) > 500:
             st.caption(f"Mostrando as 500 maiores de {len(tab_full)} linhas — "
                        "o CSV traz todas.")
-        st.caption("As lojas são número (2–25); não há nome de loja no relatório. "
-                   "**Lojas (ID)** = lojas que baixaram o item por aquele motivo.")
         slug = re.sub(r"[^a-z0-9]+", "_", mot_curto.lower()).strip("_")
         st.download_button("Baixar (CSV)", tab_full.to_csv(index=False).encode("utf-8-sig"),
                            f"anatomia_{slug}.csv", "text/csv",
@@ -1104,12 +1095,38 @@ def tela_regras():
                            "itens_regra.csv", "text/csv", icon=":material/download:")
 
 
+# =========================================================================== #
+# TELA — ITENS A VENCER, POR LOJA  (placeholder — aguarda relatório de validade)
+# =========================================================================== #
+def tela_itens_a_vencer():
+    st.title("Itens a vencer, por loja")
+    st.caption("Estoque atual que vai vencer em breve — para agir antes da perda "
+               "acontecer (transferir, promover, devolver), em vez de só medir "
+               "depois de já ter vencido.")
+    st.info(
+        "Ainda não tenho um relatório com **data de validade/lote por item e loja**. "
+        "O que já foi enviado (perdas = histórico de baixa; DADOS/cadastro = curva e "
+        "giro) não traz validade — só dá pra saber o que **já venceu**, não o que "
+        "**vai vencer**.\n\n"
+        "Envie um relatório do tipo *controle de validade* / *produtos a vencer* do "
+        "ERP, com colunas de loja, produto, lote, data de validade e quantidade em "
+        "estoque, que eu ligo essa tela.",
+        icon=":material/hourglass_empty:")
+    st.file_uploader("Relatório de itens a vencer (.xls/.xlsx/.csv)",
+                     type=["xls", "xlsx", "csv"], key="up_a_vencer",
+                     help="Ainda não processado — assim que o formato for definido, "
+                          "esta tela passa a mostrar itens a vencer por loja, "
+                          "com prioridade por valor e por dias restantes.")
+
+
 # --------------------------------------------------------------------------- #
 nav = st.navigation([
     st.Page(tela_veredito, title="Painel", icon=":material/speed:", default=True),
     st.Page(tela_motivos, title="Motivos", icon=":material/category:"),
     st.Page(tela_anatomia, title="Anatomia da perda", icon=":material/account_tree:"),
-    st.Page(tela_baldes, title="Evitável x estrutural", icon=":material/rule:"),
-    st.Page(tela_regras, title="Regras e simulação", icon=":material/tune:"),
+    st.Page(tela_itens_a_vencer, title="Itens a vencer", icon=":material/hourglass_empty:"),
+    # ocultas a pedido (2026-09-11) — reativar bastando descomentar:
+    # st.Page(tela_baldes, title="Evitável x estrutural", icon=":material/rule:"),
+    # st.Page(tela_regras, title="Regras e simulação", icon=":material/tune:"),
 ])
 nav.run()
