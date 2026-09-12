@@ -315,14 +315,16 @@ def _loja_local(df: pd.DataFrame, key: str, container=None) -> list[int]:
 
 def _regional_local(df: pd.DataFrame, key: str, container=None) -> list[str]:
     """Multiselect de Regional dentro da tela — de-para loja->regional vem de
-    `regionais.csv` (CTX['loja_regional']). Some se não tiver o arquivo, ou o
-    recorte já cair numa regional só."""
+    `regionais.csv` (CTX['loja_regional']). "Sem regional" não é uma opção:
+    loja fora do mapa (ex. depósito) não entra na lista, só fica de fora
+    quando alguma regional é escolhida. Some se não tiver o arquivo, ou só
+    houver 1 regional no recorte."""
     reg_map = CTX.get("loja_regional") or {}
     if not reg_map or "loja" not in df.columns:
         return []
     c = container if container is not None else st
-    regs = sorted({reg_map.get(int(l), "Sem regional")
-                   for l in df["loja"].dropna().unique()})
+    regs = sorted({reg_map[int(l)] for l in df["loja"].dropna().unique()
+                   if int(l) in reg_map})
     if len(regs) <= 1:
         return []
     return c.multiselect(
@@ -333,12 +335,14 @@ def _regional_local(df: pd.DataFrame, key: str, container=None) -> list[str]:
 
 
 def _filtra_regional(df: pd.DataFrame, regsel: list[str]) -> pd.DataFrame:
-    """Aplica a seleção de `_regional_local` num dataframe com coluna `loja`."""
+    """Aplica a seleção de `_regional_local` num dataframe com coluna `loja`.
+    Loja fora do mapa (ex. depósito) nunca bate com nenhuma regional
+    escolhida — não existe "sem regional" como opção."""
     if not regsel:
         return df
     reg_map = CTX.get("loja_regional") or {}
-    return df[df["loja"].map(lambda l: reg_map.get(int(l), "Sem regional")
-                             if pd.notna(l) else "Sem regional").isin(regsel)]
+    return df[df["loja"].map(
+        lambda l: reg_map.get(int(l)) if pd.notna(l) else None).isin(regsel)]
 
 
 def _mes_local(df: pd.DataFrame, key: str, container=None) -> list[str]:

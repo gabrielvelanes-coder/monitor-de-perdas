@@ -1,5 +1,18 @@
 # Pendências e histórico — Monitor de Perdas
 
+## CONCLUÍDO NESTA SESSÃO (2026-09-12, continuação — tira "Sem regional" do filtro)
+
+Gabriel notou que o filtro Regional oferecia uma 3ª opção **"Sem regional"**
+(pegava a loja 12, que é DEP/depósito e não está no `regionais.csv`) e
+apontou que esse balde não deveria existir — ou é Regional 1/2, ou nem
+aparece. Corrigido: `_regional_local` só lista lojas que **estão** no mapa
+(`if int(l) in reg_map`), nunca sintetiza "Sem regional" como opção;
+`_filtra_regional` também não trata mais loja fora do mapa como uma
+categoria — ela simplesmente nunca bate com nenhuma regional escolhida (ou
+seja, filtrando por "Regional 1" ou "Regional 2" ela sempre fica de fora, e
+sem filtro nenhum ela aparece normal, igual antes do filtro existir).
+Verificado no app rodando: dropdown mostra só "Regional 1" / "Regional 2".
+
 ## CONCLUÍDO NESTA SESSÃO (2026-09-12, continuação — filtro por Regional)
 
 Item 6 do pedido do Gabriel: filtro de **Regional** (2 supervisores, cada um
