@@ -322,26 +322,56 @@ Quanto mais perto de vencer, mais agressivo o desconto (inclusive abaixo do
 custo nas 2 primeiras faixas) — prioriza girar o estoque a deixar vencer
 (perda de 100% do custo).
 
+**Layout do arquivo de importação do ERP** — Gabriel mandou o modelo
+(print). Uma linha por item, campos separados por `|`, sem cabeçalho:
+
+```
+A|<EAN>|||<PREÇO>
+```
+
+Exemplo real:
+```
+A|7894913003073|||38.9700
+A|7894913003066|||38.9700
+A|7896023707100|||89.9500
+```
+
+- Campo 1: sempre `A` — meu palpite é "Alteração (de preço)"; **preciso
+  confirmar** se é isso mesmo e se existe outro código (ex. pra reverter um
+  preço promocional).
+- Campo 2: **EAN** (código de barras) — já temos essa coluna no relatório
+  de itens a vencer (`cod_barras` em `core._AVENCER_MAP`), então dá pra
+  cruzar certo.
+- Campos 3 e 4: sempre vazios no exemplo — sem uso aparente, só reproduzir
+  a estrutura `|||`.
+- Campo 5 (**preço**): ponto como decimal, sempre **4 casas** (`38.9700`,
+  não `38.97`), sem separador de milhar.
+
 **Em aberto, preciso fechar antes de implementar:**
 1. **Faixa 121–150 dias não tem preço definido** — mantém o markup de 120
    dias (custo × 1,10) até 150, ou é uma faixa de transição própria?
-2. **Layout do arquivo de importação do ERP** — Gabriel confirmou que a
-   saída é um **arquivo já no layout certo pra importar no ERP** (não CSV
-   genérico nem relatório manual). Preciso de um exemplo/planilha-modelo do
-   ERP (colunas, ordem, nomes exatos, delimitador) pra gerar certo.
-3. **Regra é igual pra medicamento e não-medicamento?** Medicamento tem
+2. **O arquivo é por loja ou único pra rede toda?** O saldo pré-vencido (e
+   por tanto o preço sugerido) varia por loja — o mesmo EAN pode ter dias
+   até vencer diferentes em lojas diferentes. Ou seja, a exportação
+   provavelmente precisa gerar **um arquivo por loja** (ou incluir a loja
+   nalgum campo que não apareceu no exemplo). Preciso confirmar como o ERP
+   espera isso.
+3. **Confirmar o significado do código `A`** e a extensão/nome esperado do
+   arquivo (`.txt`? sem extensão?).
+4. **Regra é igual pra medicamento e não-medicamento?** Medicamento tem
    preço-teto regulado (CMED/ANVISA — PMC), mas isso não impede desconto
    pra baixo; vale confirmar se não há alguma trava própria da rede antes
    de aplicar desconto abaixo do custo em medicamento.
-4. As faixas de dias da regra (30/60/90/120/150) são **diferentes** das
+5. As faixas de dias da regra (30/60/90/120/150) são **diferentes** das
    faixas de urgência já usadas na tela (30/90/180/365) — tudo bem terem
    propósitos diferentes (uma é pra agrupar/visualizar, a outra pra
    precificar), só registrando que não são a mesma coisa.
 
-Quando o Gabriel der sinal verde: `core.py` ganha uma função
-`sugerir_preco(dias_venc, custo_medio) -> preco_sugerido` (a regra acima) +
-export num formato próprio pro layout do ERP (item 2 acima define o
-formato).
+Quando o Gabriel der sinal verde: `core.py` ganha `sugerir_preco(dias_venc,
+custo_medio) -> preco_sugerido` (a regra da tabela acima) + `exportar_erp_precos(df)
+-> str` que gera o texto no layout `A|EAN|||PREÇO` (uma linha por item, 4
+casas decimais) — provavelmente um arquivo por loja, a confirmar (item 2
+acima).
 
 ## PENDENTE
 
