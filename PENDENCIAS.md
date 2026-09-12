@@ -1,5 +1,33 @@
 # Pendências e histórico — Monitor de Perdas
 
+## RETOMAR DAQUI (fim da sessão 2026-09-12)
+
+Tudo commitado, working tree limpa, app rodando em `localhost:8501` com o
+código mais recente. Duas frentes em aberto pra continuar:
+
+1. **Faturamento de setembro/2026** — só quando o mês fechar (ver
+   [PENDENTE #1](#1-faturamento-de-setembro2026) mais abaixo).
+2. **Regra de preço do pré-vencido** — planejamento em andamento (seção
+   [PLANEJAMENTO](#planejamento--regra-de-precificação-do-pré-vencido-2026-09-12)
+   logo abaixo), esperando o Gabriel responder:
+   - Quando o **mesmo EAN** tem mais de um lote pré-vencido ao mesmo tempo
+     (prazos diferentes), uso o do **lote mais urgente** pra definir o
+     preço daquele EAN? (palpite meu, aguardando confirmação)
+   - Faixa **121–150 dias** sem preço definido — mantém o markup de 120
+     dias (custo×1,10) até 150?
+   - Regra vale igual pra **medicamento** (preço-teto CMED/ANVISA)?
+   - Extensão/nome esperado do arquivo de importação do ERP.
+   - **Só depois de fechar isso tudo**: implementar `sugerir_preco()` +
+     `exportar_erp_precos()` em `core.py` — Gabriel foi explícito que quer
+     só planejar por enquanto, não mexer no código ainda.
+
+Sem nenhuma outra pendência de código aberta — os 6 itens pedidos nesta
+sessão (números pt-BR, explicações de UI, ocultar "Fontes de dados",
+remover "Bater com a reunião", planejar preço do pré-vencido, filtro
+Regional) foram resolvidos ou documentados como planejamento.
+
+---
+
 ## CONCLUÍDO NESTA SESSÃO (2026-09-12, continuação — tira "Sem regional" do filtro)
 
 Gabriel notou que o filtro Regional oferecia uma 3ª opção **"Sem regional"**
@@ -704,20 +732,36 @@ explícita. Hoje já dá para ver na barra lateral: **Parâmetros → Escopo →
 
 ---
 
-## Estado do app (fim da sessão 2026-09-10)
-- **5 telas** via `st.navigation`, `st.title` = rótulo do menu: Painel · Motivos ·
-  Anatomia da perda · Evitável x estrutural · Regras e simulação.
-- **Filtros:** global na sidebar (Lojas + Período) + `Meses/Lojas (nesta tela)`
-  em todas as telas. Parâmetros: Escopo, Meta (default 0,40 %), Incluir DEP.
+## Estado do app (fim da sessão 2026-09-12)
+- **3 telas visíveis** via `st.navigation`: Painel · Anatomia da perda ·
+  Itens a vencer. Ocultas (código intacto, comentado): Motivos, Evitável x
+  estrutural, Regras e simulação.
+- **Escopo de perda = "Todos os motivos" por padrão** (perda = toda baixa do
+  sistema); Painel e Anatomia têm seletor próprio (Vencido / Perda direta /
+  Todos os motivos) — nomes revisados pra não sugerir que um escopo é "mais
+  real" que outro.
+- **Filtros por tela:** `Meses`/`Lojas (nesta tela)` em todas; `Regional
+  (nesta tela)` no Painel/Anatomia/Itens a vencer (2 supervisores, de
+  `regionais.csv`); Escopo no Painel/Anatomia. Sem filtro global na sidebar
+  (removido em 09-11) — só `Digitar faturamento` e (oculto) `Fontes de
+  dados`.
+- **Números em pt-BR** em todas as tabelas/tooltips/rótulos de gráfico
+  (milhar `.`, decimal `,`) — só os eixos dos gráficos continuam no padrão
+  americano (limitação do Vega-Lite/Streamlit).
 - **Anatomia:** abre em "Todos os motivos"; bloco fixo "Todos os motivos no
   recorte" mostra a foto completa da loja/mês sempre; tabela é 1 linha por
-  produto × motivo. Join catálogo por descrição exata — item com nome de
+  produto × motivo; clique num gráfico substitui a seleção anterior (não
+  soma mais). Join catálogo por descrição exata — item com nome de
   embalagem diferente cai em "fora do catálogo".
-- **Entradas:** `perdas*.xls` (obrigatório) · `DADOS*.xlsx` (cadastro por loja) ·
-  `BASE CADASTRO COM GRUPOS.xlsx` (catálogo, só enriquece) · `faturamento.csv`
-  (jan–ago/2026). Os 4 auto-detectados na pasta; todos com uploader na sidebar.
-  `BASE CADASTRO COM EAN.xlsx` não é usada. Os 2 xlsx de catálogo estão fora do
-  git (`.gitignore`).
+- **Itens a vencer:** valor exposto usa **Saldo** do pré-vencido (não
+  Estoque Atual, que é geral); urgência em 4 faixas cumulativas (Até
+  30/90/180 dias / 12 meses).
+- **Entradas** (todas auto-detectadas na pasta, uploader manual oculto):
+  `perdas*.xls` (obrigatório) · `DADOS*.xlsx` (cadastro por loja) ·
+  `BASE CADASTRO COM GRUPOS.xlsx` (catálogo) · `faturamento.csv` (jan–ago/2026)
+  · `itens a vencer.xlsx` · `regionais.csv` (loja→regional). Todos exceto o
+  catálogo e o código ficam fora do git (`.gitignore`) — dados sensíveis ou
+  rotativos.
 - Roda em `http://localhost:8501` (headless, `--server.fileWatcherType none` →
   mudança de código só entra com restart do servidor).
 - Comando: `streamlit run app.py --server.port 8501 --server.headless true --server.fileWatcherType none`
