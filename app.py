@@ -808,9 +808,13 @@ def tela_anatomia():
             column_config={
                 "motivo_label": "Motivo", "valor": "R$", "unid": "Unidades",
                 "linhas": "Linhas", "produtos": "Produtos", "pct": "% do total"})
+        # sort="-x" não fica estável entre as duas camadas (barra + rótulo)
+        # quando são dois alt.Chart(...) independentes — usa a ordem explícita
+        # (gmot já está ordenado por valor) igual ORDEM_URGENCIA/ORD_GIRO.
+        ordem_mot = gmot["motivo_label"].tolist()
         ch_m = alt.Chart(gmot).mark_bar().encode(
             x=alt.X("valor:Q", title="R$"),
-            y=alt.Y("motivo_label:N", sort="-x", title=None),
+            y=alt.Y("motivo_label:N", sort=ordem_mot, title=None),
             color=alt.Color("no_escopo:N", scale=alt.Scale(
                 domain=[True, False], range=["#60A5FA", "#475569"]),
                 legend=None),
@@ -818,7 +822,7 @@ def tela_anatomia():
                      alt.Tooltip("unid:Q", format=",.0f")])
         lbl_m = alt.Chart(gmot).mark_text(align="left", dx=4, color="#CBD5E1",
                                           fontSize=11).encode(
-            x="valor:Q", y=alt.Y("motivo_label:N", sort="-x"),
+            x="valor:Q", y=alt.Y("motivo_label:N", sort=ordem_mot),
             text=alt.Text("valor:Q", format=",.0f"))
         c_gr.altair_chart(ch_m + lbl_m, width="stretch")
 

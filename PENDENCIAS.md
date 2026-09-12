@@ -1,5 +1,22 @@
 # Pendências e histórico — Monitor de Perdas
 
+## CONCLUÍDO NESTA SESSÃO (2026-09-12, continuação — bug de alinhamento na Anatomia)
+
+Gabriel reparou que na "Anatomia da perda", bloco "Todos os motivos no
+recorte", a ordem das barras do gráfico não batia com a ordem da tabela ao
+lado (tabela: maior R$ primeiro; gráfico: alfabético). Causa: `y=alt.Y(...,
+sort="-x")` em duas camadas (`ch_m` + `lbl_m`, barra e rótulo de valor)
+construídas como dois `alt.Chart(gmot)` **independentes** — `sort="-x"` não
+fica estável entre camadas independentes nesse caso (mesma classe de bug já
+resolvida antes no gráfico "Por urgência" do Itens a vencer, ali com uma
+lista explícita `core.ORDEM_URGENCIA`). Corrigido do mesmo jeito: `ordem_mot
+= gmot["motivo_label"].tolist()` (já vem ordenado por valor) passado como
+`sort=ordem_mot` nas duas camadas. Testado no browser: gráfico agora segue
+a mesma ordem decrescente da tabela. Os outros 3 gráficos da Anatomia
+(categoria/curva/tempo) não tinham esse bug — usam um `base` compartilhado
+entre a camada de barra e a de rótulo, em vez de dois `Chart(...)`
+separados.
+
 ## CONCLUÍDO NESTA SESSÃO (2026-09-12, continuação — terminologia sem viés)
 
 Gabriel notou que "Perda real" (no seletor "Escopo da perda") dá a entender
