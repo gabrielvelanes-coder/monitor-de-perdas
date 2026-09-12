@@ -540,19 +540,6 @@ def tela_veredito():
                     tooltip=["ano_mes", alt.Tooltip(f"{vcol}:N", title="R$")])
                 st.altair_chart(ch, width="stretch")
 
-    # ---- bater com o número da reunião --------------------------- #
-    with st.expander("Bater com o número da reunião", icon=":material/calculate:"):
-        v = st.number_input("Valor apresentado (R$/mês)", value=0.0, step=1000.0)
-        pp = st.number_input("ou % apresentado", value=0.0, step=0.1) / 100
-        pm = m["perda"].mean()
-        if v and pm:
-            st.write(f"Dados: **{BRL(pm)}/mês** · diferença "
-                     f"**{BRL(v - pm)}** ({(v/pm-1)*100:+.0f}%)")
-        elif v:
-            st.write(f"Dados: **{BRL(pm)}/mês** · diferença **{BRL(v - pm)}**")
-        if pp and taxa_pond:
-            st.write(f"Dados: **{PCT(taxa_pond)}** · diferença **{(pp-taxa_pond)*100:+.2f} p.p.**")
-
     if meses_sf or cob["lojas_sem_faturamento"]:
         avisos = []
         if meses_sf:

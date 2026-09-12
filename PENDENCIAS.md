@@ -1,5 +1,14 @@
 # Pendências e histórico — Monitor de Perdas
 
+## CONCLUÍDO NESTA SESSÃO (2026-09-12, continuação — limpeza do Painel)
+
+Removido o expander **"Bater com o número da reunião"** do rodapé do
+Painel — campo pra digitar um valor/% apresentado numa reunião e ver a
+diferença contra o dado da ferramenta. Era uma muleta da fase inicial
+(quando a taxa da ferramenta divergia do Power BI e precisava provar/
+comparar número a número); hoje o "Bridge de escopo" já mostra os 3
+recortes lado a lado, então virou redundante. A pedido do Gabriel.
+
 ## CONCLUÍDO NESTA SESSÃO (2026-09-12, continuação — números em pt-BR em tabelas e gráficos)
 
 Gabriel pediu pra revisar **todos** os números de venda/perda em tabelas e
