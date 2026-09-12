@@ -251,15 +251,71 @@ com mais valor exposto: **13** (diferente do ranking histórico de vencido,
 onde 20 lidera) — vale olhar se é fruto de uma compra/transferência recente
 que ainda dá tempo de agir.
 
+## PLANEJAMENTO — regra de precificação do pré-vencido (2026-09-12)
+
+Gabriel quer evoluir a tela **Itens a vencer**: já que o saldo pré-vencido de
+cada loja está mapeado (`custo_medio` já vem no `enriquecer_a_vencer`), a
+ideia é a ferramenta já **sugerir o preço com desconto** por item, em vez de
+só mostrar o valor exposto. Pediu **só planejar por enquanto — não
+implementar ainda**.
+
+**Regra de desconto (definida pelo Gabriel, por dias até vencer):**
+
+| Até (dias) | Preço sugerido |
+|---|---|
+| 30 | custo × 0,75 (25% de desconto sobre o custo) |
+| 60 | custo × 0,95 (5% de desconto sobre o custo) |
+| 90 | custo × 1,00 (preço de custo) |
+| 120 | custo × 1,10 (10% de markup sobre o custo) |
+| acima de 150 | sem desconto diferenciado — preço normal da loja |
+
+Quanto mais perto de vencer, mais agressivo o desconto (inclusive abaixo do
+custo nas 2 primeiras faixas) — prioriza girar o estoque a deixar vencer
+(perda de 100% do custo).
+
+**Em aberto, preciso fechar antes de implementar:**
+1. **Faixa 121–150 dias não tem preço definido** — mantém o markup de 120
+   dias (custo × 1,10) até 150, ou é uma faixa de transição própria?
+2. **Layout do arquivo de importação do ERP** — Gabriel confirmou que a
+   saída é um **arquivo já no layout certo pra importar no ERP** (não CSV
+   genérico nem relatório manual). Preciso de um exemplo/planilha-modelo do
+   ERP (colunas, ordem, nomes exatos, delimitador) pra gerar certo.
+3. **Regra é igual pra medicamento e não-medicamento?** Medicamento tem
+   preço-teto regulado (CMED/ANVISA — PMC), mas isso não impede desconto
+   pra baixo; vale confirmar se não há alguma trava própria da rede antes
+   de aplicar desconto abaixo do custo em medicamento.
+4. As faixas de dias da regra (30/60/90/120/150) são **diferentes** das
+   faixas de urgência já usadas na tela (30/90/180/365) — tudo bem terem
+   propósitos diferentes (uma é pra agrupar/visualizar, a outra pra
+   precificar), só registrando que não são a mesma coisa.
+
+Quando o Gabriel der sinal verde: `core.py` ganha uma função
+`sugerir_preco(dias_venc, custo_medio) -> preco_sugerido` (a regra acima) +
+export num formato próprio pro layout do ERP (item 2 acima define o
+formato).
+
 ## PENDENTE
 
-### 1. Faturamento de setembro/2026 — ÚNICA PENDÊNCIA ABERTA
+### 1. Faturamento de setembro/2026
 `faturamento.csv` vai até **2026-08**. Setembro ainda não fechou (dado de perda
 também é parcial). Quando fechar: pegar no Power BI *Visão geral - mês*, mês = set,
 a coluna **Receita** por **Und. ID** (22 lojas: 2–11, 13–20, 22–25; não há 12 nem 21),
 e acrescentar as linhas `loja,2026-09,valor` no `faturamento.csv`.
 Conferir sempre: soma das 22 lojas = Total exibido no rodapé do relatório.
 Agora dá para puxar isso pela extensão do Chrome (ver item 2).
+
+### 2. Filtro por regional (loja → supervisor) — aguardando o mapa das lojas
+Gabriel quer um filtro de **regional** nas telas (hoje tem 2 supervisores,
+cada um cuida de um grupo de lojas) além do filtro de loja individual que já
+existe. Falta só o **de-para loja → regional** — pedi pra ele mandar a lista
+(ex.: "Regional A: lojas 2, 3, 5, ... / Regional B: lojas 4, 6, 7, ..."). Como
+ele avisou que os supervisores/grupos são **rotativos** (loja pode trocar de
+regional), a implementação não deve cravar isso no código: melhor um arquivo
+próprio tipo `regionais.csv` (loja, regional) — igual o `faturamento.csv`,
+fora do git — que o Gabriel edita quando a divisão mudar, sem precisar mexer
+no código toda vez. Depois de ter o mapa: `core.load_regionais()` +
+multiselect "Regional" ao lado dos filtros de loja já existentes
+(`_loja_local`) nas telas.
 
 ---
 
