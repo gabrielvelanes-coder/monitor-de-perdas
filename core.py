@@ -577,6 +577,27 @@ def load_faturamento(src, ano_fallback: int | None = None) -> pd.DataFrame:
     return out.groupby(["loja", "ano_mes"], as_index=False)["faturamento"].sum()
 
 
+def load_regionais(src) -> dict:
+    """`regionais.csv` (loja, regional) -> {loja: regional}. Loja -> regional é
+    rotativo (supervisores trocam de grupo de vez em quando), por isso vem de
+    um arquivo próprio (editável pelo Gabriel) em vez de hardcode no código."""
+    name = getattr(src, "name", str(src))
+    df = (pd.read_csv(src, sep=None, engine="python", dtype=str)
+          if name.lower().endswith((".csv", ".txt")) else pd.read_excel(src, dtype=str))
+    df.columns = [_ascii(c) for c in df.columns]
+    c_loja = next((c for c in df.columns if "LOJA" in c or "UND" in c or "NEG" in c), None)
+    c_reg = next((c for c in df.columns if "REGIONAL" in c or "SUPERVISOR" in c), None)
+    if c_loja is None or c_reg is None:
+        raise ValueError(f"regionais.csv precisa de colunas loja/regional. "
+                         f"Colunas lidas: {list(df.columns)}")
+    out = {}
+    for _, r in df.iterrows():
+        loja = pd.to_numeric(r[c_loja], errors="coerce")
+        if pd.notna(loja) and str(r[c_reg]).strip():
+            out[int(loja)] = str(r[c_reg]).strip()
+    return out
+
+
 # ----------------------------------------------------------------------------- #
 # 5. métricas
 # ----------------------------------------------------------------------------- #

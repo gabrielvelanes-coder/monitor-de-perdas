@@ -31,6 +31,11 @@ e estima economia/mês).
   Painel tem seu próprio seletor de **Escopo da perda** (Vencido / Perda
   direta / Todos os motivos, default Todos) e a Anatomia tem o dela também
   (Vencido / Perda direta / Todos / específicos) — são independentes.
+- **Regional (nesta tela):** Painel, Anatomia e Itens a vencer têm um
+  multiselect de regional (2 supervisores, cada um cuida de um grupo de
+  lojas) — vem de `regionais.csv` (loja, regional), arquivo próprio fora do
+  git porque a divisão é rotativa. Sem esse arquivo na pasta, o filtro
+  simplesmente não aparece.
 - **Sem filtro global de loja/período na barra lateral** (removido a pedido em
   2026-09-11) — meta e "incluir depósito" ficam fixos no código
   (`META_PADRAO` = 0,40 %, sem DEP) em vez de widgets.
@@ -84,6 +89,7 @@ servidor. `iniciar.bat` faz o duplo-clique. Python usado:
 | 3 | `BASE CADASTRO COM GRUPOS.xlsx` | Catálogo **nível produto** (sem loja): `Classificação` (árvore), `Curva Valor`/`Qtd.`, `Status` (Ativo/Inativo). **Só enriquece** — preenche `classif`/`curva` que faltam no DADOS. Opcional. |
 | 4 | `faturamento.csv` | Faturamento por loja e mês. Sem ele os valores aparecem em R$, mas não em %. |
 | 5 | `itens a vencer.xlsx` | Saldo do pré-vencido com lote/validade, por loja (relatório do ERP: *controle de validade* / *produtos a vencer*). Traz `Saldo` (o que resta do lote pré-vencido — usado na exposição) e `Estoque Atual` (estoque geral, só de referência). Opcional — habilita a tela **Itens a vencer**. |
+| 6 | `regionais.csv` | De-para **loja → regional** (2 colunas: loja, regional). Rotativo — edita à mão quando a divisão dos supervisores mudar. Opcional — habilita o filtro **Regional (nesta tela)** no Painel/Anatomia/Itens a vencer. |
 
 `BASE CADASTRO COM EAN.xlsx` **não é usada** (o relatório de perdas não tem EAN).
 

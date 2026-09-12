@@ -197,6 +197,12 @@ def build_context() -> dict:
         itens_a_vencer = _a_vencer(auto_av[0], Path(auto_av[0]).stat().st_mtime)
         fonte_av = Path(auto_av[0]).name
 
+    # regionais (opcional) — de-para loja -> regional, rotativo, editado à mão
+    auto_reg = _achar("regionais.csv", "*regional*.csv")
+    loja_regional: dict[int, str] = {}
+    if auto_reg:
+        loja_regional = core.load_regionais(auto_reg[0])
+
     # filtros e parâmetros globais saíram da barra lateral a pedido do usuário
     # (2026-09-11) — ficam fixos aqui; cada tela mantém seu próprio filtro
     # local de loja/mês (_loja_local / _mes_local).
@@ -241,7 +247,8 @@ def build_context() -> dict:
                 incluir_dep=incluir_dep, taxa_lm=taxa_lm, mensal=mensal, cob=cob,
                 vclass=vclass, n_meses=n_meses_perda, lojas_sel=lojas_sel,
                 meses_sel=meses_sel, psig=psig, csig=csig, catsig=catsig,
-                itens_a_vencer=itens_a_vencer, fonte_av=fonte_av)
+                itens_a_vencer=itens_a_vencer, fonte_av=fonte_av,
+                loja_regional=loja_regional)
 
 
 def _editor_faturamento(perdas, fat):
@@ -306,6 +313,34 @@ def _loja_local(df: pd.DataFrame, key: str, container=None) -> list[int]:
         help="Restringe ainda mais dentro do filtro global da barra lateral.")
 
 
+def _regional_local(df: pd.DataFrame, key: str, container=None) -> list[str]:
+    """Multiselect de Regional dentro da tela — de-para loja->regional vem de
+    `regionais.csv` (CTX['loja_regional']). Some se não tiver o arquivo, ou o
+    recorte já cair numa regional só."""
+    reg_map = CTX.get("loja_regional") or {}
+    if not reg_map or "loja" not in df.columns:
+        return []
+    c = container if container is not None else st
+    regs = sorted({reg_map.get(int(l), "Sem regional")
+                   for l in df["loja"].dropna().unique()})
+    if len(regs) <= 1:
+        return []
+    return c.multiselect(
+        "Regional (nesta tela)", regs, default=[], key=key,
+        placeholder="todas as regionais",
+        help="De-para loja → regional vem de `regionais.csv` (2 supervisores, "
+             "editável à mão — a divisão de lojas é rotativa).")
+
+
+def _filtra_regional(df: pd.DataFrame, regsel: list[str]) -> pd.DataFrame:
+    """Aplica a seleção de `_regional_local` num dataframe com coluna `loja`."""
+    if not regsel:
+        return df
+    reg_map = CTX.get("loja_regional") or {}
+    return df[df["loja"].map(lambda l: reg_map.get(int(l), "Sem regional")
+                             if pd.notna(l) else "Sem regional").isin(regsel)]
+
+
 def _mes_local(df: pd.DataFrame, key: str, container=None) -> list[str]:
     """Multiselect de Meses dentro da tela, restringindo o recorte global.
     Não aparece quando o recorte já tem 0 ou 1 mês."""
@@ -344,9 +379,9 @@ def tela_veredito():
     st.title("Painel")
     meta, incluir_dep = CTX["meta"], CTX["incluir_dep"]
 
-    # ---- filtros da tela: escopo, mês e loja (dentro do recorte global) - #
+    # ---- filtros da tela: escopo, regional, mês e loja (recorte global) - #
     perdas, fat = CTX["perdas"], CTX["fat"]
-    c_esc, c_mes, c_loja = st.columns([1.3, 1, 1])
+    c_esc, c_reg, c_mes, c_loja = st.columns([1.2, 1, 1, 1])
     esc_rot = c_esc.segmented_control(
         "Escopo da perda", ["Vencido", "Perda direta", "Todos os motivos"],
         default="Todos os motivos", key="pnl_escopo",
@@ -358,6 +393,10 @@ def tela_veredito():
              "consumo/doação; 'Vencido' é só produto vencido.") or "Todos os motivos"
     esc = {"Vencido": "vencido", "Perda direta": "perda_real",
            "Todos os motivos": "todos"}[esc_rot]
+    regsel = _regional_local(perdas, "pnl_regional", c_reg)
+    if regsel:
+        perdas = _filtra_regional(perdas, regsel)
+        fat = _filtra_regional(fat, regsel) if not fat.empty else fat
     msel = _mes_local(perdas, "pnl_meses", c_mes)
     if msel:
         perdas = perdas[perdas["ano_mes"].isin(msel)]
@@ -366,8 +405,9 @@ def tela_veredito():
     if lsel:
         perdas = perdas[perdas["loja"].isin(lsel)]
         fat = fat[fat["loja"].isin(lsel)] if not fat.empty else fat
-    if msel or lsel:
+    if msel or lsel or regsel:
         st.caption("Refinado nesta tela: "
+                   + (", ".join(regsel) if regsel else "todas as regionais") + " · "
                    + (", ".join(sorted(msel)) if msel else "todos os meses") + " · "
                    + ("lojas " + ", ".join(str(x) for x in lsel) if lsel else "todas as lojas"))
 
@@ -382,6 +422,8 @@ def tela_veredito():
     nmes = max(perdas["ano_mes"].nunique(), 1)
     vc = CTX["vclass"]
     if vc is not None:
+        if regsel:
+            vc = _filtra_regional(vc, regsel)
         if msel:
             vc = vc[vc["ano_mes"].isin(msel)]
         if lsel:
@@ -733,8 +775,8 @@ def tela_anatomia():
         return
     st.caption("O que são esses itens? · recorte (filtro global): " + _recorte_txt())
 
-    # ---- motivo + filtros da tela (mês e loja, dentro do recorte global) --- #
-    c_esc, c_mot, c_mes, c_loja = st.columns([1.1, 1.7, 1, 1])
+    # ---- motivo + filtros da tela (regional/mês/loja, dentro do recorte global) - #
+    c_esc, c_mot, c_reg, c_mes, c_loja = st.columns([1.0, 1.5, 0.9, 0.9, 0.9])
     esc_a = c_esc.segmented_control(
         "Motivos", ["Vencido", "Perda direta", "Todos"], default="Todos",
         key="anat_escopo",
@@ -756,6 +798,9 @@ def tela_anatomia():
     vc = (CTX["vclass"] if cats == ("vencido",) else _vclass_recorte(cats)).copy()
     unidade = "do vencido" if cats == ("vencido",) else "do total"
 
+    regsel = _regional_local(vc, "anat_regional", c_reg)
+    if regsel:
+        vc = _filtra_regional(vc, regsel)
     msel = _mes_local(vc, "anat_meses", c_mes)
     if msel:
         vc = vc[vc["ano_mes"].isin(msel)]
@@ -795,6 +840,8 @@ def tela_anatomia():
 
     # ---- TODOS os motivos do recorte (sempre visível, ignora escopo/status) --- #
     vfull = _vclass_recorte(_cats_do_escopo("todos"))
+    if regsel:
+        vfull = _filtra_regional(vfull, regsel)
     if msel:
         vfull = vfull[vfull["ano_mes"].isin(msel)]
     if lsel:
@@ -1191,7 +1238,10 @@ def tela_itens_a_vencer():
                    "**Estoque atual** (estoque geral, não restrito ao lote "
                    "pré-vencido) como aproximação.")
 
-    c_loja, c_urg = st.columns(2)
+    c_reg, c_loja, c_urg = st.columns(3)
+    regsel = _regional_local(enr, "av_regional", c_reg)
+    if regsel:
+        enr = _filtra_regional(enr, regsel)
     lojas = sorted(int(x) for x in enr["loja"].dropna().unique())
     lsel = c_loja.multiselect("Lojas", lojas, default=[], key="av_lojas",
                               placeholder="todas as lojas")

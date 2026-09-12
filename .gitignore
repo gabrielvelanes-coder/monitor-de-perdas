@@ -14,6 +14,8 @@ faturamento.xlsx
 faturamento.json
 *itens*a*vencer*.xls*
 *.parquet
+# de-para loja -> regional (rotativo — editado à mão, não versionado)
+regionais.csv
 
 
 !.streamlit/config.toml

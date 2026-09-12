@@ -1,5 +1,41 @@
 # Pendências e histórico — Monitor de Perdas
 
+## CONCLUÍDO NESTA SESSÃO (2026-09-12, continuação — filtro por Regional)
+
+Item 6 do pedido do Gabriel: filtro de **Regional** (2 supervisores, cada um
+cuida de um grupo de lojas) nas telas, além do filtro de loja individual que
+já existia. Ele mandou as duas listas (por print, em 3 rodadas até fechar —
+as lojas 08/15/16 ficaram de fora dos 2 primeiros prints por corte de tela):
+
+- **Regional 1** (11 lojas): 2, 3, 4, 10, 13, 14, 15, 17, 19, 20, 25
+- **Regional 2** (11 lojas): 5, 6, 7, 8, 9, 11, 16, 18, 22, 23, 24
+
+Bate certinho com as 22 lojas que a ferramenta já conhece (loja 12 do
+relatório de perdas é DEP/depósito — fica como "Sem regional").
+
+**Implementação:**
+- `regionais.csv` (loja, regional) criado na pasta — **fora do git**
+  (`.gitignore`), igual `faturamento.csv`: como a divisão é **rotativa**
+  (supervisor pode trocar de grupo), o Gabriel edita esse arquivo direto
+  quando mudar, sem precisar de código novo.
+- `core.load_regionais(src) -> {loja: regional}` — novo, lê o CSV (aceita
+  variação de nome de coluna: LOJA/UND/NEG, REGIONAL/SUPERVISOR).
+- `app.py`: `build_context` auto-detecta `regionais.csv` (ou `*regional*.csv`)
+  e expõe `CTX["loja_regional"]`. Dois helpers novos, no mesmo padrão de
+  `_loja_local`/`_mes_local`: `_regional_local(df, key, container)` (mostra o
+  multiselect "Regional (nesta tela)", some se só tiver 1 regional no
+  recorte) e `_filtra_regional(df, regsel)` (aplica o filtro num dataframe
+  com coluna `loja`).
+- Ligado nas 3 telas visíveis: **Painel** (novo `c_reg`, aplicado em
+  `perdas`/`fat`/`vc` antes do filtro de mês/loja), **Anatomia** (aplicado em
+  `vc` e em `vfull`, o bloco "Todos os motivos no recorte") e **Itens a
+  vencer** (aplicado em `enr`, junto com Lojas/Urgência).
+
+Verificado no app rodando (Chrome): selecionar "Regional 1" no Painel muda
+faturamento de R$ 69,7M → R$ 34,4M e o ranking de lojas cai de 22 pra
+exatamente as 11 lojas certas. Mesmo comportamento na Anatomia e Itens a
+vencer. `streamlit.testing` smoke test: 0 exceções.
+
 ## CONCLUÍDO NESTA SESSÃO (2026-09-12, continuação — "Fontes de dados" oculto)
 
 Gabriel perguntou se o expander **"Fontes de dados"** (uploaders manuais na
@@ -303,19 +339,6 @@ a coluna **Receita** por **Und. ID** (22 lojas: 2–11, 13–20, 22–25; não h
 e acrescentar as linhas `loja,2026-09,valor` no `faturamento.csv`.
 Conferir sempre: soma das 22 lojas = Total exibido no rodapé do relatório.
 Agora dá para puxar isso pela extensão do Chrome (ver item 2).
-
-### 2. Filtro por regional (loja → supervisor) — aguardando o mapa das lojas
-Gabriel quer um filtro de **regional** nas telas (hoje tem 2 supervisores,
-cada um cuida de um grupo de lojas) além do filtro de loja individual que já
-existe. Falta só o **de-para loja → regional** — pedi pra ele mandar a lista
-(ex.: "Regional A: lojas 2, 3, 5, ... / Regional B: lojas 4, 6, 7, ..."). Como
-ele avisou que os supervisores/grupos são **rotativos** (loja pode trocar de
-regional), a implementação não deve cravar isso no código: melhor um arquivo
-próprio tipo `regionais.csv` (loja, regional) — igual o `faturamento.csv`,
-fora do git — que o Gabriel edita quando a divisão mudar, sem precisar mexer
-no código toda vez. Depois de ter o mapa: `core.load_regionais()` +
-multiselect "Regional" ao lado dos filtros de loja já existentes
-(`_loja_local`) nas telas.
 
 ---
 
