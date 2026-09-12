@@ -336,9 +336,7 @@ A|7894913003066|||38.9700
 A|7896023707100|||89.9500
 ```
 
-- Campo 1: sempre `A` — meu palpite é "Alteração (de preço)"; **preciso
-  confirmar** se é isso mesmo e se existe outro código (ex. pra reverter um
-  preço promocional).
+- Campo 1: `A` = **"Preço"** (tipo de registro — confirmado pelo Gabriel).
 - Campo 2: **EAN** (código de barras) — já temos essa coluna no relatório
   de itens a vencer (`cod_barras` em `core._AVENCER_MAP`), então dá pra
   cruzar certo.
@@ -347,31 +345,44 @@ A|7896023707100|||89.9500
 - Campo 5 (**preço**): ponto como decimal, sempre **4 casas** (`38.9700`,
   não `38.97`), sem separador de milhar.
 
-**Em aberto, preciso fechar antes de implementar:**
+**Arquivo único pra rede toda (confirmado pelo Gabriel)** — não precisa ser
+por loja. O preço só passa a valer numa venda quando **(a)** a loja tem
+aquele item como pré-vencido em estoque **e (b)** o operador de caixa
+seleciona o **lote** na hora da venda — ou seja, o próprio ERP já garante
+que o desconto só se aplica ao lote pré-vencido de verdade, mesmo o arquivo
+sendo só EAN → preço (sem loja, sem lote).
+
+**Novo ponto em aberto, por causa disso:** o arquivo é por **EAN**, não por
+lote — então se o **mesmo produto** tiver mais de um lote pré-vencido ao
+mesmo tempo (em lojas diferentes, ou até na mesma loja) com prazos bem
+diferentes, só dá pra mandar **um preço só** pra aquele EAN no arquivo. Meu
+palpite: usar sempre o lote **mais urgente** (menos dias até vencer) pra
+definir o preço daquele EAN — é a opção mais conservadora (garante que o
+lote mais crítico saia com o desconto certo; o efeito colateral é que um
+lote menos urgente do mesmo produto, se existir, sairia mais barato do que
+precisaria). Preciso que o Gabriel confirme se é assim mesmo que quer, ou
+se prefere outra regra de desempate (ex. média ponderada pelo saldo).
+
+**Em aberto, ainda preciso fechar antes de implementar:**
 1. **Faixa 121–150 dias não tem preço definido** — mantém o markup de 120
-   dias (custo × 1,10) até 150, ou é uma faixa de transição própria?
-2. **O arquivo é por loja ou único pra rede toda?** O saldo pré-vencido (e
-   por tanto o preço sugerido) varia por loja — o mesmo EAN pode ter dias
-   até vencer diferentes em lojas diferentes. Ou seja, a exportação
-   provavelmente precisa gerar **um arquivo por loja** (ou incluir a loja
-   nalgum campo que não apareceu no exemplo). Preciso confirmar como o ERP
-   espera isso.
-3. **Confirmar o significado do código `A`** e a extensão/nome esperado do
-   arquivo (`.txt`? sem extensão?).
-4. **Regra é igual pra medicamento e não-medicamento?** Medicamento tem
+   dias (custo × 1,10) até 150, ou é uma faixa de transição própria? (O
+   Gabriel repetiu a regra 30/60/90/120 sem mencionar o "acima de 150" de
+   novo — ainda não bati o martelo nisso.)
+2. **Extensão/nome esperado do arquivo** (`.txt`? sem extensão?).
+3. **Regra é igual pra medicamento e não-medicamento?** Medicamento tem
    preço-teto regulado (CMED/ANVISA — PMC), mas isso não impede desconto
    pra baixo; vale confirmar se não há alguma trava própria da rede antes
    de aplicar desconto abaixo do custo em medicamento.
-5. As faixas de dias da regra (30/60/90/120/150) são **diferentes** das
+4. As faixas de dias da regra (30/60/90/120/150) são **diferentes** das
    faixas de urgência já usadas na tela (30/90/180/365) — tudo bem terem
    propósitos diferentes (uma é pra agrupar/visualizar, a outra pra
    precificar), só registrando que não são a mesma coisa.
 
 Quando o Gabriel der sinal verde: `core.py` ganha `sugerir_preco(dias_venc,
 custo_medio) -> preco_sugerido` (a regra da tabela acima) + `exportar_erp_precos(df)
--> str` que gera o texto no layout `A|EAN|||PREÇO` (uma linha por item, 4
-casas decimais) — provavelmente um arquivo por loja, a confirmar (item 2
-acima).
+-> str` que agrupa por EAN (pegando o lote mais urgente de cada produto, a
+confirmar), e gera o texto no layout `A|EAN|||PREÇO` — um arquivo só, pra
+rede toda, 4 casas decimais.
 
 ## PENDENTE
 
