@@ -4,7 +4,7 @@ streamlit run app.py
 
 Três telas visíveis (título = rótulo do menu), cada uma responde uma pergunta:
   1. Painel ............... a perda é aceitável? (escopo escolhível: vencido /
-                             perda real / todos os motivos — perda = toda
+                             perda direta / todos os motivos — perda = toda
                              baixa do sistema, por padrão)
   2. Anatomia da perda .... o que são esses itens? (medicamento? curva? giro? motivo?)
   3. Itens a vencer ....... o que ainda dá pra vender antes de perder?
@@ -37,7 +37,7 @@ PCT = lambda v, d=2: f"{v*100:,.{d}f}%".replace(".", ",") if pd.notna(v) else "�
 
 COR = {"ok": "#34D399", "atencao": "#FBBF24", "critico": "#F87171", "sem_dados": "#94A3B8"}
 COR_BALDE = {"pdv": "#34D399", "compra": "#FB923C", "cadastro": "#F87171", "sem_cadastro": "#94A3B8"}
-CLASSE_COR = {"Vencido": "#F87171", "Outra perda real": "#FB923C", "Não é perda": "#94A3B8"}
+CLASSE_COR = {"Vencido": "#F87171", "Outra perda direta": "#FB923C", "Baixa comercial": "#94A3B8"}
 
 ESCOPO_PADRAO = "todos"  # perda = toda baixa do sistema; Painel deixa trocar
 META_PADRAO = 0.004  # 0,40% do faturamento
@@ -327,14 +327,15 @@ def tela_veredito():
     perdas, fat = CTX["perdas"], CTX["fat"]
     c_esc, c_mes, c_loja = st.columns([1.3, 1, 1])
     esc_rot = c_esc.segmented_control(
-        "Escopo da perda", ["Vencido", "Perda real", "Todos os motivos"],
+        "Escopo da perda", ["Vencido", "Perda direta", "Todos os motivos"],
         default="Todos os motivos", key="pnl_escopo",
         help="O que conta como 'perda' no cálculo da taxa. 'Todos os motivos' "
              "soma toda baixa do sistema (marketing, reembolso, consumo, "
              "doação, vencido, danificado, furto, descontinuado...); "
-             "'Perda real' tira marketing/reembolso/consumo/doação; "
-             "'Vencido' é só produto vencido.") or "Todos os motivos"
-    esc = {"Vencido": "vencido", "Perda real": "perda_real",
+             "'Perda direta' é o que sai do estoque sem compensação (vencido, "
+             "danificado, furto, descontinuado) — tira marketing/reembolso/"
+             "consumo/doação; 'Vencido' é só produto vencido.") or "Todos os motivos"
+    esc = {"Vencido": "vencido", "Perda direta": "perda_real",
            "Todos os motivos": "todos"}[esc_rot]
     msel = _mes_local(perdas, "pnl_meses", c_mes)
     if msel:
@@ -476,7 +477,7 @@ def tela_veredito():
         with st.container(border=True):
             st.markdown("**Bridge de escopo** — mesmo relatório, três recortes")
             for key, rot in [("vencido", "Somente vencidos"),
-                             ("perda_real", "Perda real"),
+                             ("perda_real", "Perda direta"),
                              ("todos", "Todos os motivos")]:
                 v_mes = p.loc[p["motivo_cat"].map(lambda c: core.in_escopo(c, key)),
                               "valor_total"].sum() / nmes
@@ -592,7 +593,7 @@ def tela_motivos():
     # ---- 3 cartões: bridge de escopo ------------------------------------- #
     st.markdown("**Bridge de escopo** — mesmo relatório, três recortes")
     escs = [("vencido", "Somente vencidos"),
-            ("perda_real", "Perda real"),
+            ("perda_real", "Perda direta"),
             ("todos", "Todos os motivos")]
     with st.container(horizontal=True):
         for key, rot in escs:
@@ -719,11 +720,11 @@ def tela_anatomia():
     # ---- motivo + filtros da tela (mês e loja, dentro do recorte global) --- #
     c_esc, c_mot, c_mes, c_loja = st.columns([1.1, 1.7, 1, 1])
     esc_a = c_esc.segmented_control(
-        "Motivos", ["Vencido", "Perda real", "Todos"], default="Todos",
+        "Motivos", ["Vencido", "Perda direta", "Todos"], default="Todos",
         key="anat_escopo",
         help="Começa em Todos os motivos para você nunca perder uma linha. "
              "Estreite para Vencido quando quiser só a anatomia do vencido.") or "Todos"
-    esc_key = {"Vencido": "vencido", "Perda real": "perda_real", "Todos": "todos"}[esc_a]
+    esc_key = {"Vencido": "vencido", "Perda direta": "perda_real", "Todos": "todos"}[esc_a]
     labels_all = [core.LABEL[k] for k in core.CATS if k != "ignorar"]
     mot_extra = c_mot.multiselect(
         "…ou motivos específicos", labels_all, default=[], key="anat_motivos",

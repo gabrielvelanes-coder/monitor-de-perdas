@@ -40,7 +40,8 @@ def _norm_produto(s) -> str:
 # ----------------------------------------------------------------------------- #
 # 1. classificação de motivo
 # ----------------------------------------------------------------------------- #
-# categoria -> (rótulo amigável, conta como "perda real"?)
+# categoria -> (rótulo amigável, conta como "perda direta"? — sai do estoque
+# sem nenhuma compensação, ao contrário de marketing/reembolso/consumo/doação)
 CATS = {
     "vencido":              ("Produto vencido",            True),
     "danificado":           ("Produto danificado",         True),
@@ -93,7 +94,7 @@ def classify_motivo(motivo: str) -> str:
 
 ESCOPOS = {
     "vencido":    "Somente vencidos",
-    "perda_real": "Perda real (vencido + danificado + furto + descontinuado + outros)",
+    "perda_real": "Perda direta (vencido + danificado + furto + descontinuado + outros)",
     "todos":      "Todos os motivos (inclui marketing, consumo, reembolso...)",
 }
 
@@ -106,30 +107,34 @@ def in_escopo(cat: str, escopo: str) -> bool:
     return cat == "vencido"
 
 
-# categoria de motivo -> classe (3 baldes, usados na tela "Motivos")
-CLASSES_PERDA = ["Vencido", "Outra perda real", "Não é perda"]
+# categoria de motivo -> classe (3 baldes, usados na tela "Motivos"). Nomes
+# descritivos, sem julgar o que é "real" ou "não é perda" — todo motivo tira
+# item do estoque; a diferença é se tem compensação (marketing/reembolso/
+# consumo/doação) ou não (quebra: vencido/danificado/furto/descontinuado).
+CLASSES_PERDA = ["Vencido", "Outra perda direta", "Baixa comercial"]
 
 _CLASSE_MOTIVO = {
     "vencido":              "Vencido",
-    "danificado":           "Outra perda real",
-    "furto":                "Outra perda real",
-    "descontinuado":        "Outra perda real",
-    "outros":               "Outra perda real",
-    "consumo_loja":         "Não é perda",
-    "marketing":            "Não é perda",
-    "reembolso_fornecedor": "Não é perda",
-    "devolucao_fornecedor": "Não é perda",
-    "bonificado":           "Não é perda",
-    "doacao":               "Não é perda",
-    "treinamento":          "Não é perda",
-    "ignorar":              "Não é perda",
+    "danificado":           "Outra perda direta",
+    "furto":                "Outra perda direta",
+    "descontinuado":        "Outra perda direta",
+    "outros":               "Outra perda direta",
+    "consumo_loja":         "Baixa comercial",
+    "marketing":            "Baixa comercial",
+    "reembolso_fornecedor": "Baixa comercial",
+    "devolucao_fornecedor": "Baixa comercial",
+    "bonificado":           "Baixa comercial",
+    "doacao":               "Baixa comercial",
+    "treinamento":          "Baixa comercial",
+    "ignorar":              "Baixa comercial",
 }
 
 
 def classe_motivo(motivo_cat: str) -> str:
-    """Balde de 3 níveis p/ a tela Motivos: Vencido / Outra perda real / Não é perda.
-    Coerente com IS_PERDA_REAL (só separa o vencido do resto da perda real)."""
-    return _CLASSE_MOTIVO.get(motivo_cat, "Outra perda real")
+    """Balde de 3 níveis p/ a tela Motivos: Vencido / Outra perda direta / Baixa
+    comercial. Coerente com IS_PERDA_REAL (só separa o vencido do resto da
+    perda direta)."""
+    return _CLASSE_MOTIVO.get(motivo_cat, "Outra perda direta")
 
 
 # ----------------------------------------------------------------------------- #

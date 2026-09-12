@@ -1,5 +1,29 @@
 # Pendências e histórico — Monitor de Perdas
 
+## CONCLUÍDO NESTA SESSÃO (2026-09-12, continuação — terminologia sem viés)
+
+Gabriel notou que "Perda real" (no seletor "Escopo da perda") dá a entender
+que os outros escopos não são reais — viés de linguagem, bem na contramão do
+que a mudança do item 2 (perda = todos os motivos) queria resolver. Pediu
+sugestão neutra.
+
+Termos trocados em **todo o app** (não só o seletor do Painel — a Anatomia
+tinha o mesmo seletor, e o gráfico "Top motivos" a mesma classificação):
+- **"Perda real"** → **"Perda direta"** (vencido + danificado + furto +
+  descontinuado + outros — sai do estoque sem nenhuma compensação).
+- **"Outra perda real"** → **"Outra perda direta"** e **"Não é perda"** →
+  **"Baixa comercial"** (`core.CLASSES_PERDA`/`_CLASSE_MOTIVO`, usados no
+  gráfico "Top motivos" do Painel e na tela Motivos oculta) — descreve o que
+  é (tem contrapartida comercial: marketing/reembolso/consumo/doação) em vez
+  de negar que seja perda.
+- `core.ESCOPOS["perda_real"]` e todo texto de ajuda/rótulo correspondente
+  em `app.py` (Painel, Anatomia, Bridge de escopo) e no `README.md`
+  atualizados junto. A chave interna `"perda_real"`/`IS_PERDA_REAL` no código
+  não mudou (só o texto visível ao usuário).
+
+Verificado no app rodando: seletor do Painel, Bridge de escopo, legenda "Top
+motivos" e seletor "Motivos" da Anatomia todos mostram os termos novos.
+
 ## CONCLUÍDO NESTA SESSÃO (2026-09-12)
 
 Lista de 5 pedidos do Gabriel, resolvidos um a um (a lista virou seção

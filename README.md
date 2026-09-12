@@ -1,7 +1,9 @@
 # Monitor de Perdas — Grupo Velanes
 
 Dashboard Streamlit para acompanhar a **taxa de perdas por mês** (perda ÷
-faturamento), separar o que é perda de verdade do que não é, e diagnosticar de
+faturamento), abrir essa perda por motivo — separando o que sai do estoque
+sem compensação (quebra: vencido/danificado/furto/descontinuado) do que tem
+alguma contrapartida (marketing/reembolso/consumo/doação) — e diagnosticar de
 onde vem o vencimento cruzando com curva / giro / estoque / catálogo.
 
 ## As telas (`st.navigation`)
@@ -10,27 +12,28 @@ Visíveis no menu:
 
 | Tela | Pergunta que responde |
 |---|---|
-| **Painel** | A perda é aceitável? Escopo escolhível na própria tela (**Vencido / Perda real / Todos os motivos** — perda = toda baixa do sistema por padrão). 4 KPIs (faturamento · perda no escopo · taxa ponderada · gap vs meta), semáforo + diagnóstico automático, evolução mensal vs meta, ranking de lojas por taxa, bridge de escopo (3 recortes lado a lado), top motivos. |
-| **Anatomia da perda** | O que são esses itens? Abre em **Todos os motivos** e traz um bloco fixo "Todos os motivos no recorte" (R$/unid/linhas/produtos por motivo). Escopo Vencido / Perda real / Todos + motivos específicos. Medicamento × não-medicamento × sem classificação, por categoria da árvore, por curva de quantidade (**Com giro A–H** / **Sem giro I**), por **tempo da última venda** (até 90 / até 180 / acima de 180 dias). Os 3 gráficos são clicáveis e filtram a tabela de produtos (uma linha por produto **e motivo**). |
+| **Painel** | A perda é aceitável? Escopo escolhível na própria tela (**Vencido / Perda direta / Todos os motivos** — perda = toda baixa do sistema por padrão). 4 KPIs (faturamento · perda no escopo · taxa ponderada · gap vs meta), semáforo + diagnóstico automático, evolução mensal vs meta, ranking de lojas por taxa, bridge de escopo (3 recortes lado a lado), top motivos. |
+| **Anatomia da perda** | O que são esses itens? Abre em **Todos os motivos** e traz um bloco fixo "Todos os motivos no recorte" (R$/unid/linhas/produtos por motivo). Escopo Vencido / Perda direta / Todos + motivos específicos. Medicamento × não-medicamento × sem classificação, por categoria da árvore, por curva de quantidade (**Com giro A–H** / **Sem giro I**), por **tempo da última venda** (até 90 / até 180 / acima de 180 dias). Os 3 gráficos são clicáveis (clique substitui a seleção anterior no mesmo gráfico) e filtram a tabela de produtos (uma linha por produto **e motivo**). |
 | **Itens a vencer** | **Saldo do pré-vencido** (o que resta do lote a vencer, não o estoque geral) com data de validade, por loja — para agir antes de virar perda. Urgência em 4 faixas cumulativas: **Até 30 / 90 / 180 dias / 12 meses**. KPIs de valor exposto por urgência, gráfico por urgência e por loja, tabela com lote/validade/curva. Cruza com o DADOS só para trazer custo médio (valor = saldo × custo). |
 
 Ocultas do menu (código continua em `app.py`, é só remover o comentário de
 `st.navigation` para reativar): **Motivos** (de-para de cada motivo de baixa
-com % do faturamento e classe Vencido/Outra perda real/Não é perda — pausada
-a pedido do Gabriel, sem mexer por ora), **Evitável × estrutural** (4 baldes
-— PDV / excesso de compra / item suspenso / fora do mix — com ação por item)
-e **Regras e simulação** (simula teto de estoque por curva/categoria e
-estima economia/mês).
+com % do faturamento e classe Vencido/Outra perda direta/Baixa comercial —
+pausada a pedido do Gabriel, sem mexer por ora), **Evitável × estrutural**
+(4 baldes — PDV / excesso de compra / item suspenso / fora do mix — com ação
+por item) e **Regras e simulação** (simula teto de estoque por curva/categoria
+e estima economia/mês).
 
 ## Filtros
 
 - **Por tela:** cada tela tem `Meses (nesta tela)` + `Lojas (nesta tela)`
-  (Painel/Motivos/Anatomia) — some quando o recorte já tem ≤ 1 mês/loja. A
-  Anatomia também tem seu próprio seletor de **Motivos** (Vencido / Perda real
-  / Todos / específicos).
-- **Sem filtro global na barra lateral** (removido a pedido em 2026-09-11) —
-  escopo, meta e "incluir depósito" ficam fixos no código (`ESCOPO_PADRAO`,
-  `META_PADRAO` = 0,40 %, sem DEP) em vez de widgets.
+  (Painel/Motivos/Anatomia) — some quando o recorte já tem ≤ 1 mês/loja. O
+  Painel tem seu próprio seletor de **Escopo da perda** (Vencido / Perda
+  direta / Todos os motivos, default Todos) e a Anatomia tem o dela também
+  (Vencido / Perda direta / Todos / específicos) — são independentes.
+- **Sem filtro global de loja/período na barra lateral** (removido a pedido em
+  2026-09-11) — meta e "incluir depósito" ficam fixos no código
+  (`META_PADRAO` = 0,40 %, sem DEP) em vez de widgets.
 
 ## Por que existe
 
@@ -42,7 +45,7 @@ jan–ago/2026 (todas as lojas, sem DEP) fica em:
 | Recorte | % do faturamento | R$/mês |
 |---|---:|---:|
 | Somente vencidos | **0,55 %** | ~43 mil |
-| Perda real (venc.+danif.+furto+descont.+outros) | **0,58 %** | ~46 mil |
+| Perda direta (venc.+danif.+furto+descont.+outros) | **0,58 %** | ~46 mil |
 | Todos os motivos | **0,69 %** | ~54 mil |
 
 Média mensal da taxa (somente vencidos) jan–ago: **0,53 %**, com tendência de alta
@@ -105,10 +108,17 @@ Dá para digitar na barra lateral (**Digitar faturamento**); fica salvo em
 
 ## Escopos de perda
 
-- **Somente vencidos** — o que interessa monitorar de fato.
-- **Perda real** — vencido + danificado + furto + descontinuado + outros.
-- **Todos os motivos** — inclui marketing, consumo de loja, reembolso, devolução,
-  bonificação, doação, treinamento. Serve para reproduzir um número "cheio".
+Nomes descritivos de propósito — nenhum escopo é "mais real" que outro, a
+diferença é só o que cada um inclui:
+
+- **Somente vencidos** — só o motivo "produto vencido".
+- **Perda direta** — vencido + danificado + furto + descontinuado + outros:
+  sai do estoque sem nenhuma compensação.
+- **Todos os motivos** — soma tudo, incluindo marketing, consumo de loja,
+  reembolso, devolução, bonificação, doação, treinamento — motivos que
+  também tiram item do estoque, mas com alguma contrapartida (o fornecedor
+  reembolsa, o item vira uso interno, etc.). Padrão do Painel desde
+  2026-09-12, a pedido do Gabriel — perda = toda baixa do sistema.
 
 ## Medicamento × não-medicamento
 
