@@ -849,7 +849,7 @@ def tela_anatomia():
             cat = (d0.groupby("cat1", as_index=False)
                    .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum"))
                    .sort_values(mcol, ascending=False).head(12))
-            sel_cat = alt.selection_point(fields=["cat1"], name="pcat", toggle="true")
+            sel_cat = alt.selection_point(fields=["cat1"], name="pcat")
             base_cat = alt.Chart(cat).encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
                 y=alt.Y("cat1:N", sort="-x", title=None))
@@ -867,7 +867,7 @@ def tela_anatomia():
             vc["giro_grupo"] = vc["curva_qtd"].map(_grupo_giro)
             g = (vc.groupby("giro_grupo", as_index=False)
                  .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum")))
-            sel_cv = alt.selection_point(fields=["giro_grupo"], name="pcg", toggle="true")
+            sel_cv = alt.selection_point(fields=["giro_grupo"], name="pcg")
             base_cv = alt.Chart(g).encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
                 y=alt.Y("giro_grupo:N", sort=ORD_GIRO, title=None))
@@ -882,7 +882,7 @@ def tela_anatomia():
             vc["tempo_grupo"] = pd.to_numeric(vc["ult_venda_dias"], errors="coerce").map(_grupo_tempo)
             fg = (vc.groupby("tempo_grupo", as_index=False)
                   .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum")))
-            sel_g = alt.selection_point(fields=["tempo_grupo"], name="pgiro", toggle="true")
+            sel_g = alt.selection_point(fields=["tempo_grupo"], name="pgiro")
             base_g = alt.Chart(fg).encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
                 y=alt.Y("tempo_grupo:N", sort=ORD_TEMPO, title=None))

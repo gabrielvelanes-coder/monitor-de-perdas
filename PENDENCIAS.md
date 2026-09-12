@@ -34,6 +34,20 @@ enquanto (a tela ainda existe no código, comentada em `st.navigation`,
 igual Evitável/Regras). Menu agora tem só 3 itens: Painel · Anatomia da
 perda · Itens a vencer. Docstring do topo do `app.py` atualizada.
 
+**5. Anatomia — clicar numa 2ª barra do mesmo gráfico agora substitui a
+1ª (em vez de somar).** Gabriel confirmou o cenário exato: dentro do MESMO
+gráfico (ex. Categoria), clicar em GENÉRICOS depois PROPAGADO deixava os
+dois somados na tabela — só resetava clicando "Limpar filtros". Causa:
+`alt.selection_point(..., toggle="true")` nos 3 gráficos força todo clique
+a ser aditivo (multi-seleção), mesmo sem Shift. Corrigido: `toggle="true"`
+removido dos 3 (`sel_cat`/`sel_cv`/`sel_g`) — volta ao padrão do Vega-Lite
+(clique normal **substitui** a seleção; Shift+clique estende pra
+multi-seleção quem quiser). Efeito colateral aceito: clicar 2x na mesma
+barra não "solta" mais sozinho — usa o botão "Limpar filtros dos gráficos"
+pra isso (Gabriel topou essa troca). Testado no browser: clicar PROPAGADO →
+tabela "Categoria: PROPAGADO"; clicar GENÉRICOS em seguida → tabela vira
+"Categoria: GENÉRICOS" (não mais "PROPAGADO, GENÉRICOS").
+
 ## CONCLUÍDO NESTA SESSÃO (2026-09-11, continuação)
 
 ### Correção: "Itens a vencer" usava a coluna errada para o valor exposto
@@ -130,15 +144,6 @@ onde 20 lidera) — vale olhar se é fruto de uma compra/transferência recente
 que ainda dá tempo de agir.
 
 ## PENDENTE
-
-### 0. Anatomia — clique num gráfico não limpa a seleção de outro (5º pedido, 2026-09-12)
-Gabriel gostou da interatividade dos gráficos "Categoria" e "Curva" + tabela,
-só perguntou se dá pra melhorar o caso de filtrar um gráfico e depois filtrar
-outro sem precisar clicar "Limpar filtros dos gráficos" antes — ele mesmo
-disse que não tem problema se for assim mesmo. Investigando (`alt.selection_point`
-com `toggle="true"` em cada um dos 3 gráficos, filtros combinados em AND na
-tabela) — perguntei pra ele qual cenário exato incomoda antes de mexer, pra
-não quebrar o "clique de novo solta" que ele pediu antes.
 
 ### 1. Faturamento de setembro/2026 — ÚNICA PENDÊNCIA ABERTA
 `faturamento.csv` vai até **2026-08**. Setembro ainda não fechou (dado de perda
