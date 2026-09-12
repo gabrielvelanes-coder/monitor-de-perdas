@@ -1,5 +1,35 @@
 # Pendências e histórico — Monitor de Perdas
 
+## CONCLUÍDO NESTA SESSÃO (2026-09-11, continuação)
+
+### Correção: "Itens a vencer" usava a coluna errada para o valor exposto
+Gabriel explicou os 4 campos do relatório do ERP (que a tela tratava como se
+`Estoque Atual` fosse o "estoque pré-vencido"):
+- **Quantidade Inicial** (`qtd_inicial`) — quantidade lançada no lote pré-vencido.
+- **Qtd. Movimentada** (`qtd_movimentada`) — quantidade já vendida *dentro* desse
+  pré-vencido.
+- **Saldo** (`saldo`) = Quantidade Inicial − Qtd. Movimentada — o que **ainda
+  resta** daquele lote pré-vencido. **É isso que expõe risco de perda.**
+- **Estoque Atual** (`estoque_atual`) — estoque **geral** da loja pro produto,
+  **não** restrito a esse lote (pode incluir outros lotes normais, ou não
+  refletir ainda a baixa do pré-vencido) — só referência.
+
+O código usava `estoque_atual` (clipado ≥0) como base de `valor_exposto`. Nos
+dados reais, `saldo` ≠ `estoque_atual` em **2.648 das 4.249 linhas (62%)** —
+em alguns casos o estoque geral é maior (mistura outros lotes), em outros é
+menor (a baixa do pré-vencido ainda não bateu no estoque geral). Corrigido:
+`core.enriquecer_a_vencer` agora usa `saldo` (com fallback pra `estoque_atual`
+só se o relatório não trouxer a coluna Saldo — com aviso na tela). `core.py`:
+`_AVENCER_MAP` ganhou `qtd_inicial`/`qtd_movimentada`/`saldo`. `app.py`: tabela
+da tela mostra **Saldo (pré-vencido)** e **Estoque atual (geral)** lado a lado;
+caption do topo trocou "Estoque atual" por "Saldo do pré-vencido".
+
+**Efeito real medido:** total de estoque exposto caiu de **R$ 396.050**
+(errado, base `estoque_atual`) para **R$ 277.439** (correto, base `saldo`) —
+o número antigo superestimava o risco ao contar estoque de outros lotes como
+se fosse tudo pré-vencido. Por urgência (novo): ≤30d R$ 57.671 · 31-60d
+R$ 81.662 · 61-90d R$ 63.760 · 91-180d R$ 56.681 · >180d R$ 17.666.
+
 ## CONCLUÍDO NESTA SESSÃO (2026-09-11)
 
 Lista de mudanças pedida pelo Gabriel, feita em lote (commit `22414b1` + o

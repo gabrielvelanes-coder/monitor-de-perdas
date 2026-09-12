@@ -370,6 +370,9 @@ _AVENCER_MAP = [
     ("status",        lambda n: n == "STATUS"),
     ("produto",       lambda n: n == "EMBALAGEM"),
     ("lote",          lambda n: n == "LOTE"),
+    ("qtd_inicial",   lambda n: "QUANTIDADE INICIAL" in n),
+    ("qtd_movimentada", lambda n: "MOVIMENTADA" in n),
+    ("saldo",         lambda n: n == "SALDO"),
     ("estoque_atual", lambda n: n == "ESTOQUE ATUAL"),
     ("dias_venc",     lambda n: "DIAS" in n and "VENCIMENTO" in n),
     ("data_fab",      lambda n: "FABRICA" in n),
@@ -386,8 +389,17 @@ _AVENCER_MAP = [
 
 def load_itens_a_vencer(source) -> pd.DataFrame:
     """Relatório de estoque com lote/validade (ERP) -> loja, loja_nome, produto,
-       lote, estoque_atual, dias_venc, data_validade, classif, curva_qtd,
-       curva_valor, mvm, demanda_30d. Só linhas com Status = Ativo."""
+       lote, qtd_inicial, qtd_movimentada, saldo, estoque_atual, dias_venc,
+       data_validade, classif, curva_qtd, curva_valor, mvm, demanda_30d. Só
+       linhas com Status = Ativo.
+
+       qtd_inicial = quantidade lançada no lote pré-vencido; qtd_movimentada =
+       quantidade já vendida dentro desse pré-vencido; saldo = qtd_inicial -
+       qtd_movimentada = o que ainda resta desse lote pré-vencido (é isso que
+       expõe risco de perda, não o estoque geral). estoque_atual = estoque
+       geral da loja para o produto, **não** restrito a esse lote pré-vencido
+       — pode ser maior (tem estoque de outros lotes) ou menor (o lote
+       pré-vencido ainda não foi baixado do sistema) que o saldo."""
     name = getattr(source, "name", str(source))
     raw = _read_xlsx(source) if name.lower().endswith(("xlsx", "xlsm")) else pd.read_csv(source)
     ren = {}
@@ -409,7 +421,8 @@ def load_itens_a_vencer(source) -> pd.DataFrame:
         av = av[av["status"].astype(str).str.strip().str.casefold() == "ativo"]
     av["loja"] = pd.to_numeric(av["loja"], errors="coerce")
     av["produto"] = av["produto"].astype(str).str.strip()
-    for c in ("estoque_atual", "dias_venc", "mvm", "demanda_30d"):
+    for c in ("estoque_atual", "qtd_inicial", "qtd_movimentada", "saldo",
+              "dias_venc", "mvm", "demanda_30d"):
         if c in av.columns:
             av[c] = pd.to_numeric(av[c], errors="coerce")
     av["data_validade"] = pd.to_datetime(av["data_validade"], errors="coerce")
@@ -419,14 +432,19 @@ def load_itens_a_vencer(source) -> pd.DataFrame:
 
 def enriquecer_a_vencer(av: pd.DataFrame, cad: pd.DataFrame | None) -> pd.DataFrame:
     """Cruza itens a vencer com o cadastro (loja, produto) só para trazer custo
-    médio; estima valor_exposto = estoque atual (não-negativo) x custo médio."""
+    médio; estima valor_exposto = saldo do lote pré-vencido (não-negativo) x
+    custo médio. Usa `saldo` (o que resta do pré-vencido) e não `estoque_atual`
+    (estoque geral, que pode não bater com o saldo do lote — ver
+    `load_itens_a_vencer`); cai para `estoque_atual` só se o relatório não
+    trouxer a coluna Saldo."""
     m = av.copy()
     if cad is not None and not cad.empty and "custo_medio" in cad.columns:
         m = m.merge(cad[["loja", "produto", "custo_medio"]], on=["loja", "produto"],
                     how="left")
     else:
         m["custo_medio"] = pd.NA
-    m["estoque_pos"] = m["estoque_atual"].clip(lower=0)
+    base_col = "saldo" if "saldo" in m.columns else "estoque_atual"
+    m["estoque_pos"] = m[base_col].clip(lower=0)
     m["valor_exposto"] = m["estoque_pos"] * m["custo_medio"]
     m["macro"] = m["classif"].map(macro_categoria) if "classif" in m.columns else "sem classificacao"
 

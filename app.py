@@ -1124,13 +1124,18 @@ def tela_itens_a_vencer():
             "lote, data de validade e estoque, na barra lateral.",
             icon=":material/hourglass_empty:")
         return
-    st.caption(f"Estoque atual, por data de validade — para agir antes da perda "
-               f"acontecer · fonte `{CTX['fonte_av']}`")
+    st.caption(f"Saldo do pré-vencido (o que ainda resta do lote a vencer), por "
+               f"data de validade — para agir antes da perda acontecer · "
+               f"fonte `{CTX['fonte_av']}`")
 
     enr = core.enriquecer_a_vencer(av, CTX["cad"])
     if CTX["cad"] is None:
         st.caption(":material/info: Sem cadastro (DADOS) carregado — mostrando só "
                    "unidades, sem valor em R$ (falta o custo médio por loja/produto).")
+    if "saldo" not in enr.columns:
+        st.caption(":material/warning: Relatório sem coluna **Saldo** — usando "
+                   "**Estoque atual** (estoque geral, não restrito ao lote "
+                   "pré-vencido) como aproximação.")
 
     c_loja, c_urg = st.columns(2)
     lojas = sorted(int(x) for x in enr["loja"].dropna().unique())
@@ -1195,15 +1200,18 @@ def tela_itens_a_vencer():
     with st.container(border=True):
         st.markdown(f"**Itens** — {NUM(len(enr))} lotes · "
                     f"{BRLc(tot_valor) if tem_valor else NUM(tot_estoque) + ' unidades'}")
-        cols = ["loja", "produto", "lote", "estoque_atual", "dias_venc", "data_validade",
-                "urgencia", "curva_qtd", "macro"]
+        cols = ["loja", "produto", "lote", "saldo", "estoque_atual", "dias_venc",
+                "data_validade", "urgencia", "curva_qtd", "macro"]
+        cols = [c for c in cols if c in enr.columns]
         if tem_valor:
-            cols.insert(4, "valor_exposto")
+            cols.insert(cols.index("estoque_atual") if "estoque_atual" in cols else len(cols),
+                        "valor_exposto")
         tab = (enr[cols].sort_values(
-            "valor_exposto" if tem_valor else "estoque_atual", ascending=False)
+            "valor_exposto" if tem_valor else "estoque_pos", ascending=False)
             .head(500).reset_index(drop=True))
         cfg = {"loja": "Loja", "produto": "Produto", "lote": "Lote",
-               "estoque_atual": "Estoque", "dias_venc": "Dias p/ vencer",
+               "saldo": "Saldo (pré-vencido)", "estoque_atual": "Estoque atual (geral)",
+               "dias_venc": "Dias p/ vencer",
                "data_validade": st.column_config.DateColumn("Validade", format="DD/MM/YYYY"),
                "urgencia": "Urgência", "curva_qtd": "Curva", "macro": "Categoria",
                "valor_exposto": st.column_config.NumberColumn("R$ exposto", format="R$ %.0f")}
