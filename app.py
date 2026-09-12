@@ -41,6 +41,9 @@ CLASSE_COR = {"Vencido": "#F87171", "Outra perda direta": "#FB923C", "Baixa come
 
 ESCOPO_PADRAO = "todos"  # perda = toda baixa do sistema; Painel deixa trocar
 META_PADRAO = 0.004  # 0,40% do faturamento
+MOSTRAR_FONTES_DADOS = False  # uploaders manuais na sidebar — ocultos a pedido
+# (2026-09-12): o fluxo real é sempre soltar o arquivo na pasta (auto-detect);
+# vira True de novo se precisar testar um relatório pontual sem renomear/mover.
 
 
 def BRLc(v) -> str:
@@ -133,14 +136,16 @@ def build_context() -> dict:
     st.sidebar.markdown("### :material/monitoring: Monitor de Perdas")
     st.sidebar.caption("Grupo Velanes")
 
-    with st.sidebar.expander("Fontes de dados", icon=":material/folder:", expanded=False):
-        up_p = st.file_uploader("Relatório de perdas (.xls/.xlsx)", type=["xls", "xlsx"])
-        up_c = st.file_uploader("Cadastro — arquivos DADOS (.xlsx)", type=["xlsx"],
-                                accept_multiple_files=True)
-        up_cat = st.file_uploader("Catálogo — BASE CADASTRO COM GRUPOS (.xlsx)",
-                                  type=["xlsx"])
-        up_f = st.file_uploader("Faturamento (.csv/.xlsx)", type=["csv", "xlsx"])
-        up_av = st.file_uploader("Itens a vencer (.xlsx/.csv)", type=["xlsx", "csv"])
+    up_p = up_c = up_cat = up_f = up_av = None
+    if MOSTRAR_FONTES_DADOS:
+        with st.sidebar.expander("Fontes de dados", icon=":material/folder:", expanded=False):
+            up_p = st.file_uploader("Relatório de perdas (.xls/.xlsx)", type=["xls", "xlsx"])
+            up_c = st.file_uploader("Cadastro — arquivos DADOS (.xlsx)", type=["xlsx"],
+                                    accept_multiple_files=True)
+            up_cat = st.file_uploader("Catálogo — BASE CADASTRO COM GRUPOS (.xlsx)",
+                                      type=["xlsx"])
+            up_f = st.file_uploader("Faturamento (.csv/.xlsx)", type=["csv", "xlsx"])
+            up_av = st.file_uploader("Itens a vencer (.xlsx/.csv)", type=["xlsx", "csv"])
 
     # perdas (obrigatório)
     auto_p = _achar("perdas*.xls", "perdas*.xlsx", "*Baixa*Estoque*.xls*")

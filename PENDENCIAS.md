@@ -1,5 +1,17 @@
 # Pendências e histórico — Monitor de Perdas
 
+## CONCLUÍDO NESTA SESSÃO (2026-09-12, continuação — "Fontes de dados" oculto)
+
+Gabriel perguntou se o expander **"Fontes de dados"** (uploaders manuais na
+barra lateral) ainda tinha necessidade, já que o app auto-detecta os 5
+arquivos pela pasta. Decisão: manter a funcionalidade (fallback útil pra
+testar um relatório pontual sem mover pra pasta), mas **ocultar** da UI —
+mesmo tratamento dado a Motivos/Evitável/Regras. `app.py`: nova constante
+`MOSTRAR_FONTES_DADOS = False` no topo; o bloco dos 5 `st.file_uploader`
+só roda se `True` (os `up_*` viram `None` quando oculto — o resto do código
+já testava `is not None`, nada mais mudou). Reativa voltando a constante
+pra `True`.
+
 ## CONCLUÍDO NESTA SESSÃO (2026-09-12, continuação — limpeza do Painel)
 
 Removido o expander **"Bater com o número da reunião"** do rodapé do
