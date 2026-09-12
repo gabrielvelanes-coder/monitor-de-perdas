@@ -57,6 +57,22 @@ def NUM(v) -> str:
     return f"{v:,.0f}".replace(",", ".")
 
 
+def PTNUM(v, d=0) -> str:
+    """1.234,56 — pt-BR genérico: milhar com ponto, decimal com vírgula."""
+    if pd.isna(v):
+        return "—"
+    s = f"{v:,.{d}f}"  # ex.: "1,234.56" (padrão EUA)
+    return s.translate(str.maketrans({",": "\x00", ".": ","})).replace("\x00", ".")
+
+
+def _fmtcol(df, col, fmt=BRLc):
+    """Cria '<col>_fmt' (string pt-BR) e devolve o nome — pra usar em Tooltip/Text
+    do Altair em vez de format=',.0f' (que é separador americano: 388,455)."""
+    fcol = f"{col}_fmt"
+    df[fcol] = df[col].map(fmt)
+    return fcol
+
+
 def _cor_taxa(taxa: float, meta: float) -> str:
     """Semáforo de uma taxa contra a meta (mesma régua de frase_diagnostico)."""
     if pd.isna(taxa):
@@ -433,10 +449,11 @@ def tela_veredito():
             d = m[["ano_mes", "taxa"]].copy()
             d["taxa"] *= 100
             d["meta"] = meta * 100
+            tcol = _fmtcol(d, "taxa", lambda v: PTNUM(v, 2))
             base = alt.Chart(d).encode(x=alt.X("ano_mes:N", title=None))
             linha = base.mark_line(point=True, strokeWidth=2, color=COR["atencao"]).encode(
                 y=alt.Y("taxa:Q", title="%"),
-                tooltip=["ano_mes", alt.Tooltip("taxa:Q", format=".2f")])
+                tooltip=["ano_mes", alt.Tooltip(f"{tcol}:N", title="taxa %")])
             meta_l = base.mark_rule(strokeDash=[4, 4], color="#94A3B8").encode(y="meta:Q")
             st.altair_chart(linha + meta_l, width="stretch")
     with right:
@@ -451,15 +468,18 @@ def tela_veredito():
                 rl["taxa"] = rl["perda"] / rl["faturamento"] * 100
                 rl["loja"] = rl["loja"].astype("Int64").astype(str)
                 rl["nivel"] = rl["taxa"].map(lambda t: _cor_taxa(t / 100, meta))
+                tcol = _fmtcol(rl, "taxa", lambda v: PTNUM(v, 2))
+                pcol = _fmtcol(rl, "perda", BRLc)
+                fcol = _fmtcol(rl, "faturamento", BRLc)
                 barras = alt.Chart(rl).mark_bar().encode(
                     x=alt.X("taxa:Q", title="% do faturamento"),
                     y=alt.Y("loja:N", sort="-x", title="Loja"),
                     color=alt.Color("nivel:N", scale=alt.Scale(
                         domain=["ok", "atencao", "critico"],
                         range=[COR["ok"], COR["atencao"], COR["critico"]]), legend=None),
-                    tooltip=["loja", alt.Tooltip("taxa:Q", title="taxa %", format=".2f"),
-                             alt.Tooltip("perda:Q", title="perda R$", format=",.0f"),
-                             alt.Tooltip("faturamento:Q", title="faturamento R$", format=",.0f")])
+                    tooltip=["loja", alt.Tooltip(f"{tcol}:N", title="taxa %"),
+                             alt.Tooltip(f"{pcol}:N", title="perda"),
+                             alt.Tooltip(f"{fcol}:N", title="faturamento")])
                 meta_r = alt.Chart(pd.DataFrame({"m": [meta * 100]})).mark_rule(
                     strokeDash=[4, 4], color="#94A3B8").encode(x="m:Q")
                 st.altair_chart(barras + meta_r, width="stretch")
@@ -491,14 +511,14 @@ def tela_veredito():
             gm = (p.assign(classe=p["motivo_cat"].map(core.classe_motivo))
                   .groupby(["motivo_label", "classe"], as_index=False)["valor_total"].sum()
                   .sort_values("valor_total", ascending=False).head(8))
+            vcol = _fmtcol(gm, "valor_total", BRLc)
             ch = alt.Chart(gm).mark_bar().encode(
                 x=alt.X("valor_total:Q", title="R$ no período"),
-                y=alt.Y("motivo_label:N", sort="-x", title=None),
+                y=alt.Y("motivo_label:N", sort=gm["motivo_label"].tolist(), title=None),
                 color=alt.Color("classe:N", scale=alt.Scale(
                     domain=list(CLASSE_COR), range=list(CLASSE_COR.values())),
                     legend=alt.Legend(orient="bottom", title=None)),
-                tooltip=["motivo_label", "classe",
-                         alt.Tooltip("valor_total:Q", format=",.0f")])
+                tooltip=["motivo_label", "classe", alt.Tooltip(f"{vcol}:N", title="R$")])
             st.altair_chart(ch, width="stretch")
 
     # ---- meses sem faturamento (perda em R$) ---------------------- #
@@ -513,10 +533,11 @@ def tela_veredito():
                             "(taxa % indisponível)")
                 st.caption("Complete o `faturamento.csv` (ou a barra lateral) com "
                            + ", ".join(meses_sf) + " para ver a taxa desses meses.")
+                vcol = _fmtcol(mm, "valor_total", BRLc)
                 ch = alt.Chart(mm).mark_bar(color="#94A3B8").encode(
                     x=alt.X("ano_mes:N", title=None),
                     y=alt.Y("valor_total:Q", title="R$ perda"),
-                    tooltip=["ano_mes", alt.Tooltip("valor_total:Q", format=",.0f")])
+                    tooltip=["ano_mes", alt.Tooltip(f"{vcol}:N", title="R$")])
                 st.altair_chart(ch, width="stretch")
 
     # ---- bater com o número da reunião --------------------------- #
@@ -618,46 +639,49 @@ def tela_motivos():
     g["pct_fat"] = g["motivo_cat"].map(lambda c: _pct_fat(vfat.get(c, 0.0)))
     g = g.sort_values("valor", ascending=False).reset_index(drop=True)
 
+    g_show = g.copy()
+    g_show["valor"] = g_show["valor"].map(BRLc)
+    g_show["valor_mes"] = g_show["valor_mes"].map(BRLc)
+    g_show["pct_fat"] = g_show["pct_fat"].map(PCT)
+    g_show["pct_lancado"] = g_show["pct_lancado"].map(PCT)
+    g_show["linhas"] = g_show["linhas"].map(NUM)
     with st.container(border=True):
         st.markdown("**Por motivo** (período: " + ", ".join(sel) + ")")
         st.dataframe(
-            g[["motivo_label", "classe", "valor", "valor_mes", "pct_fat",
-               "pct_lancado", "linhas"]],
+            g_show[["motivo_label", "classe", "valor", "valor_mes", "pct_fat",
+                    "pct_lancado", "linhas"]],
             hide_index=True, width="stretch",
             column_config={
-                "motivo_label": "Motivo",
-                "classe": "Classe",
-                "valor": st.column_config.NumberColumn("R$ no período", format="R$ %.0f"),
-                "valor_mes": st.column_config.NumberColumn("R$/mês", format="R$ %.0f"),
-                "pct_fat": st.column_config.NumberColumn("% do faturamento", format="percent"),
-                "pct_lancado": st.column_config.NumberColumn("% do lançado", format="percent"),
+                "motivo_label": "Motivo", "classe": "Classe",
+                "valor": "R$ no período", "valor_mes": "R$/mês",
+                "pct_fat": "% do faturamento", "pct_lancado": "% do lançado",
                 "linhas": "Linhas"})
 
     left, right = st.columns(2)
     with left:
         with st.container(border=True):
             st.markdown("**Peso de cada motivo** (R$ no período, cor = classe)")
+            vcol = _fmtcol(g, "valor", BRLc)
             ch = alt.Chart(g).mark_bar().encode(
                 x=alt.X("valor:Q", title="R$ no período"),
-                y=alt.Y("motivo_label:N", sort="-x", title=None),
+                y=alt.Y("motivo_label:N", sort=g["motivo_label"].tolist(), title=None),
                 color=alt.Color("classe:N", scale=alt.Scale(
                     domain=list(CLASSE_COR), range=list(CLASSE_COR.values())),
                     legend=alt.Legend(orient="bottom", title=None)),
-                tooltip=["motivo_label", "classe",
-                         alt.Tooltip("valor:Q", format=",.0f")])
+                tooltip=["motivo_label", "classe", alt.Tooltip(f"{vcol}:N", title="R$")])
             st.altair_chart(ch, width="stretch")
     with right:
         with st.container(border=True):
             st.markdown("**Por mês, empilhado por classe**")
             gm = p.groupby(["ano_mes", "classe"], as_index=False)["valor_total"].sum()
+            vcol2 = _fmtcol(gm, "valor_total", BRLc)
             ch2 = alt.Chart(gm).mark_bar().encode(
                 x=alt.X("ano_mes:N", title=None),
                 y=alt.Y("valor_total:Q", title="R$"),
                 color=alt.Color("classe:N", scale=alt.Scale(
                     domain=list(CLASSE_COR), range=list(CLASSE_COR.values())),
                     legend=alt.Legend(orient="bottom", title=None)),
-                tooltip=["ano_mes", "classe",
-                         alt.Tooltip("valor_total:Q", format=",.0f")])
+                tooltip=["ano_mes", "classe", alt.Tooltip(f"{vcol2}:N", title="R$ no mês")])
             st.altair_chart(ch2, width="stretch")
 
 
@@ -755,8 +779,8 @@ def tela_anatomia():
     tot_real = vc["valor_total"].sum()
     tot = tot_real or 1.0
     und_real = int(vc["itens"].sum())
-    tip_val = alt.Tooltip("valor_total:Q", title="R$ perda", format=",.0f")
-    tip_itens = alt.Tooltip("itens:Q", title="Unidades", format=",.0f")
+    tip_val = alt.Tooltip("valor_total_fmt:N", title="R$ perda")
+    tip_itens = alt.Tooltip("itens_fmt:N", title="Unidades")
 
     # ---- macro: total + medicamento / não / sem classificação --------- #
     macro = (vc.groupby("macro", as_index=False)["valor_total"].sum()
@@ -812,18 +836,20 @@ def tela_anatomia():
         # quando são dois alt.Chart(...) independentes — usa a ordem explícita
         # (gmot já está ordenado por valor) igual ORDEM_URGENCIA/ORD_GIRO.
         ordem_mot = gmot["motivo_label"].tolist()
+        gvcol = _fmtcol(gmot, "valor", NUM)
+        gucol = _fmtcol(gmot, "unid", NUM)
         ch_m = alt.Chart(gmot).mark_bar().encode(
             x=alt.X("valor:Q", title="R$"),
             y=alt.Y("motivo_label:N", sort=ordem_mot, title=None),
             color=alt.Color("no_escopo:N", scale=alt.Scale(
                 domain=[True, False], range=["#60A5FA", "#475569"]),
                 legend=None),
-            tooltip=["motivo_label", alt.Tooltip("valor:Q", format=",.0f"),
-                     alt.Tooltip("unid:Q", format=",.0f")])
+            tooltip=["motivo_label", alt.Tooltip(f"{gvcol}:N", title="R$ perda"),
+                     alt.Tooltip(f"{gucol}:N", title="Unidades")])
         lbl_m = alt.Chart(gmot).mark_text(align="left", dx=4, color="#CBD5E1",
                                           fontSize=11).encode(
             x="valor:Q", y=alt.Y("motivo_label:N", sort=ordem_mot),
-            text=alt.Text("valor:Q", format=",.0f"))
+            text=alt.Text(f"{gvcol}:N"))
         c_gr.altair_chart(ch_m + lbl_m, width="stretch")
 
     if "anat_nonce" not in st.session_state:
@@ -840,6 +866,7 @@ def tela_anatomia():
                                 help="Eixo dos três gráficos: R$ vencido ou nº de unidades.")
             mcol = "valor_total" if medida == "R$ vencido" else "itens"
             mtitle = "R$ vencido" if medida == "R$ vencido" else "Unidades vencidas"
+            mcol_fmt = f"{mcol}_fmt"
             gsel = st.segmented_control(
                 "Ver", ["Todas", "Só medicamento", "Só não-medicamento",
                         "Só sem classificação"],
@@ -854,16 +881,19 @@ def tela_anatomia():
             cat = (d0.groupby("cat1", as_index=False)
                    .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum"))
                    .sort_values(mcol, ascending=False).head(12))
+            _fmtcol(cat, "valor_total", NUM)
+            _fmtcol(cat, "itens", NUM)
+            ordem_cat = cat["cat1"].tolist()
             sel_cat = alt.selection_point(fields=["cat1"], name="pcat")
             base_cat = alt.Chart(cat).encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
-                y=alt.Y("cat1:N", sort="-x", title=None))
+                y=alt.Y("cat1:N", sort=ordem_cat, title=None))
             ch = (base_cat.mark_bar(color="#60A5FA").encode(
                 opacity=alt.condition(sel_cat, alt.value(1.0), alt.value(0.35)),
                 tooltip=["cat1", tip_val, tip_itens]).add_params(sel_cat))
             lbl_cat = base_cat.mark_text(align="left", dx=4, color="#CBD5E1",
                                          fontSize=11).encode(
-                text=alt.Text(f"{mcol}:Q", format=",.0f"))
+                text=alt.Text(f"{mcol_fmt}:N"))
             ev_cat = st.altair_chart(ch + lbl_cat, width="stretch", on_select="rerun",
                                      key=f"anat_ch_cat_{nk}")
     with right:
@@ -872,6 +902,8 @@ def tela_anatomia():
             vc["giro_grupo"] = vc["curva_qtd"].map(_grupo_giro)
             g = (vc.groupby("giro_grupo", as_index=False)
                  .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum")))
+            _fmtcol(g, "valor_total", NUM)
+            _fmtcol(g, "itens", NUM)
             sel_cv = alt.selection_point(fields=["giro_grupo"], name="pcg")
             base_cv = alt.Chart(g).encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
@@ -880,13 +912,15 @@ def tela_anatomia():
                 opacity=alt.condition(sel_cv, alt.value(1.0), alt.value(0.35)),
                 tooltip=["giro_grupo", tip_val, tip_itens]).add_params(sel_cv))
             lbl_cv = base_cv.mark_text(align="left", dx=4, color="#CBD5E1", fontSize=11).encode(
-                text=alt.Text(f"{mcol}:Q", format=",.0f"))
+                text=alt.Text(f"{mcol_fmt}:N"))
             ev_cv = st.altair_chart(ch + lbl_cv, width="stretch", on_select="rerun",
                                     key=f"anat_ch_cv_{nk}")
             st.markdown("**Tempo da última venda**")
             vc["tempo_grupo"] = pd.to_numeric(vc["ult_venda_dias"], errors="coerce").map(_grupo_tempo)
             fg = (vc.groupby("tempo_grupo", as_index=False)
                   .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum")))
+            _fmtcol(fg, "valor_total", NUM)
+            _fmtcol(fg, "itens", NUM)
             sel_g = alt.selection_point(fields=["tempo_grupo"], name="pgiro")
             base_g = alt.Chart(fg).encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
@@ -895,7 +929,7 @@ def tela_anatomia():
                 opacity=alt.condition(sel_g, alt.value(1.0), alt.value(0.35)),
                 tooltip=["tempo_grupo", tip_val, tip_itens]).add_params(sel_g))
             lbl_g = base_g.mark_text(align="left", dx=4, color="#CBD5E1", fontSize=11).encode(
-                text=alt.Text(f"{mcol}:Q", format=",.0f"))
+                text=alt.Text(f"{mcol_fmt}:N"))
             ev_g = st.altair_chart(ch2 + lbl_g, width="stretch", on_select="rerun",
                                    key=f"anat_ch_giro_{nk}")
 
@@ -943,14 +977,17 @@ def tela_anatomia():
             agg["status_cadastro"] = ("status_cadastro", "first")
         tab_full = (d.groupby(["produto", "motivo_label"], as_index=False).agg(**agg)
                     .sort_values("valor", ascending=False).reset_index(drop=True))
-        tab = tab_full.head(500)
+        tab = tab_full.head(500).copy()
+        tab["valor"] = tab["valor"].map(BRLc)
+        tab["itens"] = tab["itens"].map(NUM)
+        tab["dias_sem_vender"] = tab["dias_sem_vender"].map(NUM)
+        tab["n_lojas"] = tab["n_lojas"].map(NUM)
         st.dataframe(tab, hide_index=True, width="stretch", height=360,
                      column_config={
                          "produto": "Produto",
                          "motivo_label": "Motivo",
-                         "valor": st.column_config.NumberColumn("Total perda (R$)",
-                                                                format="R$ %.0f"),
-                         "itens": st.column_config.NumberColumn("Unidades", format="%.0f"),
+                         "valor": "Total perda (R$)",
+                         "itens": "Unidades",
                          "curva_qtd": "Curva",
                          "macro": "Categoria", "cat": "Árvore nível 1",
                          "tempo_grupo": "Tempo da última venda",
@@ -1004,12 +1041,13 @@ def tela_baldes():
             st.markdown("**Composição**")
             d = rb.copy()
             d["k"] = d["balde_label"].str.split(" \\(").str[0]
+            vcol = _fmtcol(d, "valor", NUM)
             ch = alt.Chart(d).mark_bar().encode(
                 x=alt.X("valor:Q", stack="normalize", title="% do vencido", axis=alt.Axis(format="%")),
                 y=alt.Y("k:N", sort=list(d["k"]), title=None),
                 color=alt.Color("balde:N", scale=alt.Scale(
                     domain=list(COR_BALDE), range=list(COR_BALDE.values())), legend=None),
-                tooltip=["balde_label", alt.Tooltip("valor:Q", format=",.0f")])
+                tooltip=["balde_label", alt.Tooltip(f"{vcol}:N", title="R$")])
             st.altair_chart(ch, width="stretch")
     with right:
         with st.container(border=True):
@@ -1018,13 +1056,14 @@ def tela_baldes():
             gl["loja"] = gl["loja"].astype("Int64").astype(str)
             ordem_loja = (gl.groupby("loja")["valor_total"].sum()
                           .sort_values(ascending=False).index.tolist())
+            vcol2 = _fmtcol(gl, "valor_total", NUM)
             ch = alt.Chart(gl).mark_bar().encode(
                 x=alt.X("valor_total:Q", title="R$ vencido"),
                 y=alt.Y("loja:N", sort=ordem_loja, title="Loja"),
                 color=alt.Color("balde:N", scale=alt.Scale(
                     domain=list(COR_BALDE), range=list(COR_BALDE.values())),
                     legend=alt.Legend(orient="bottom", title=None)),
-                tooltip=["loja", "balde", alt.Tooltip("valor_total:Q", format=",.0f")])
+                tooltip=["loja", "balde", alt.Tooltip(f"{vcol2}:N", title="R$")])
             st.altair_chart(ch, width="stretch")
 
     st.markdown("### Detalhe por balde")
@@ -1038,8 +1077,11 @@ def tela_baldes():
                         curva_qtd=("curva_qtd", "first"), macro=("macro", "first"),
                         dias_sem_vender=("ult_venda_dias", "max"), lojas=("loja", "nunique"))
                    .sort_values("valor", ascending=False).head(80))
+            tab["valor"] = tab["valor"].map(BRLc)
+            tab["dias_sem_vender"] = tab["dias_sem_vender"].map(NUM)
+            tab["lojas"] = tab["lojas"].map(NUM)
             st.dataframe(tab, hide_index=True, width="stretch", height=280,
-                         column_config={"valor": st.column_config.NumberColumn("R$", format="R$ %.0f"),
+                         column_config={"valor": "R$",
                                         "curva_valor": "Curva valor", "curva_qtd": "Curva qtd",
                                         "dias_sem_vender": "Dias s/ vender"})
 
@@ -1088,7 +1130,7 @@ def tela_regras():
         c.metric("SKUs afetados pela regra", f"{sim['produtos']:,}".replace(",", "."),
                  border=True)
         st.caption(
-            f"Base: R$ {sim['base_periodo']:,.0f} de vencido caiu no balde "
+            f"Base: {BRLc(sim['base_periodo'])} de vencido caiu no balde "
             f"'excesso de compra' nesse recorte no período. A regra assume que "
             f"{red*100:.0f}% disso é evitável não comprando / não repondo item sem giro.")
 
@@ -1118,9 +1160,12 @@ def tela_regras():
                     cat=("cat1", "first"), dias_sem_vender=("ult_venda_dias", "max"),
                     lojas=("loja", "nunique"))
                .sort_values("valor", ascending=False).head(200))
+        tab["valor"] = tab["valor"].map(BRLc)
+        tab["dias_sem_vender"] = tab["dias_sem_vender"].map(NUM)
+        tab["lojas"] = tab["lojas"].map(NUM)
         st.dataframe(tab, hide_index=True, width="stretch", height=340,
                      column_config={
-                         "valor": st.column_config.NumberColumn("R$ vencido", format="R$ %.0f"),
+                         "valor": "R$ vencido",
                          "curva_valor": "Curva valor", "curva_qtd": "Curva qtd",
                          "dias_sem_vender": "Dias s/ vender"})
         st.download_button("Baixar lista completa (CSV)",
@@ -1190,15 +1235,18 @@ def tela_itens_a_vencer():
             mtitle = "R$ exposto" if tem_valor else "Unidades"
             g = (enr.groupby("urgencia", as_index=False)
                  .agg(valor_exposto=("valor_exposto", "sum"), estoque_pos=("estoque_pos", "sum")))
+            vcol = _fmtcol(g, "valor_exposto", BRLc)
+            ecol = _fmtcol(g, "estoque_pos", NUM)
+            mcol_fmt = f"{mcol}_fmt"
             ch = alt.Chart(g).mark_bar(color="#FBBF24").encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
                 y=alt.Y("urgencia:N", sort=core.ORDEM_URGENCIA, title=None),
-                tooltip=["urgencia", alt.Tooltip("valor_exposto:Q", format=",.0f"),
-                         alt.Tooltip("estoque_pos:Q", format=",.0f")])
+                tooltip=["urgencia", alt.Tooltip(f"{vcol}:N", title="R$ exposto"),
+                         alt.Tooltip(f"{ecol}:N", title="Unidades")])
             lbl = alt.Chart(g).mark_text(align="left", dx=4, color="#CBD5E1",
                                         fontSize=11).encode(
                 x=f"{mcol}:Q", y=alt.Y("urgencia:N", sort=core.ORDEM_URGENCIA),
-                text=alt.Text(f"{mcol}:Q", format=",.0f"))
+                text=alt.Text(f"{mcol_fmt}:N"))
             st.altair_chart(ch + lbl, width="stretch")
     with right:
         with st.container(border=True):
@@ -1207,11 +1255,13 @@ def tela_itens_a_vencer():
                   .agg(valor_exposto=("valor_exposto", "sum"), estoque_pos=("estoque_pos", "sum")))
             gl["loja"] = gl["loja"].astype("Int64").astype(str)
             ordem_loja = gl.sort_values(mcol, ascending=False)["loja"].tolist()
+            vcol2 = _fmtcol(gl, "valor_exposto", BRLc)
+            ecol2 = _fmtcol(gl, "estoque_pos", NUM)
             ch = alt.Chart(gl).mark_bar(color="#60A5FA").encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
                 y=alt.Y("loja:N", sort=ordem_loja, title="Loja"),
-                tooltip=["loja", alt.Tooltip("valor_exposto:Q", format=",.0f"),
-                         alt.Tooltip("estoque_pos:Q", format=",.0f")])
+                tooltip=["loja", alt.Tooltip(f"{vcol2}:N", title="R$ exposto"),
+                         alt.Tooltip(f"{ecol2}:N", title="Unidades")])
             st.altair_chart(ch, width="stretch")
 
     with st.container(border=True):
@@ -1226,12 +1276,17 @@ def tela_itens_a_vencer():
         tab = (enr[cols].sort_values(
             "valor_exposto" if tem_valor else "estoque_pos", ascending=False)
             .head(500).reset_index(drop=True))
+        for c in ("saldo", "estoque_atual", "dias_venc"):
+            if c in tab.columns:
+                tab[c] = tab[c].map(NUM)
+        if "valor_exposto" in tab.columns:
+            tab["valor_exposto"] = tab["valor_exposto"].map(BRLc)
         cfg = {"loja": "Loja", "produto": "Produto", "lote": "Lote",
                "saldo": "Saldo (pré-vencido)", "estoque_atual": "Estoque atual (geral)",
                "dias_venc": "Dias p/ vencer",
                "data_validade": st.column_config.DateColumn("Validade", format="DD/MM/YYYY"),
                "urgencia": "Urgência", "curva_qtd": "Curva", "macro": "Categoria",
-               "valor_exposto": st.column_config.NumberColumn("R$ exposto", format="R$ %.0f")}
+               "valor_exposto": "R$ exposto"}
         st.dataframe(tab, hide_index=True, width="stretch", height=380, column_config=cfg)
         if len(enr) > 500:
             st.caption(f"Mostrando as 500 maiores de {len(enr)} linhas — o CSV traz todas.")

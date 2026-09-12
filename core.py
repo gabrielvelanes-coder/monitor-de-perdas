@@ -803,9 +803,11 @@ def frase_diagnostico(mensal: pd.DataFrame, vclass: pd.DataFrame,
     cat_nome = top_cat.index[0] if len(top_cat) else "—"
     cat_pct = (top_cat.iloc[0] / tot) if len(top_cat) else 0
 
-    meta_txt = {"ok": f"na meta de {meta*100:.2f}% (ou abaixo)",
-                "atencao": f"até 30% acima da meta de {meta*100:.2f}%",
-                "critico": f"acima da meta de {meta*100:.2f}%"}[nivel]
+    meta_pct = f"{meta*100:.2f}".replace(".", ",")
+    taxa_pct = f"{taxa*100:.2f}".replace(".", ",")
+    meta_txt = {"ok": f"na meta de {meta_pct}% (ou abaixo)",
+                "atencao": f"até 30% acima da meta de {meta_pct}%",
+                "critico": f"acima da meta de {meta_pct}%"}[nivel]
     if taxa > hi:
         banda_txt = "e acima da faixa de mercado de varejo farma (0,3%–0,8%)"
     elif taxa < lo:
@@ -813,7 +815,7 @@ def frase_diagnostico(mensal: pd.DataFrame, vclass: pd.DataFrame,
     else:
         banda_txt = "e dentro da faixa de mercado de varejo farma (0,3%–0,8%)"
     return nivel, (
-        f"Taxa média de {taxa*100:.2f}% do faturamento — {meta_txt}, {banda_txt}. "
+        f"Taxa média de {taxa_pct}% do faturamento — {meta_txt}, {banda_txt}. "
         f"{pct_med*100:.0f}% da perda é medicamento e {cat_pct*100:.0f}% vem de "
         f"{cat_nome.title()}. Apenas {pct_pdv*100:.0f}% é item com giro que venceu na "
         f"gôndola — a alavanca está na compra e no cadastro, não na disciplina de loja."

@@ -1,5 +1,51 @@
 # Pendências e histórico — Monitor de Perdas
 
+## CONCLUÍDO NESTA SESSÃO (2026-09-12, continuação — números em pt-BR em tabelas e gráficos)
+
+Gabriel pediu pra revisar **todos** os números de venda/perda em tabelas e
+gráficos e formatar em pt-BR (milhar com ponto, decimal com vírgula).
+Achado: várias tabelas usavam `st.column_config.NumberColumn(format="R$
+%.0f")` (Python `%`-format — sem separador de milhar nenhum, ex. "R$
+388455") e quase todos os gráficos usavam `alt.Tooltip(..., format=",.0f")`
+(d3-format americano — vírgula como milhar, ex. "388,455") tanto nas
+tooltips quanto nos rótulos de valor em cima das barras (`mark_text`). O
+texto do "Diagnóstico" no Painel também tinha `.2f` cru (`0.67%` em vez de
+`0,67%`).
+
+**Correção sistemática** (`app.py` + `core.py`):
+- `PTNUM(v, d=0)` novo — formatador pt-BR genérico (milhar `.`, decimal
+  `,`), usa `str.translate` pra trocar os separadores de uma vez só (evita
+  o bug clássico de `.replace()` em cadeia embaralhar milhar com decimal).
+- `_fmtcol(df, col, fmt)` novo — cria `<col>_fmt` (string já em pt-BR) num
+  dataframe e devolve o nome da coluna, pra usar em `Tooltip`/`Text` do
+  Altair como campo **Nominal** (`:N`) em vez de `Quantitative` com
+  `format=`. O Vega-Lite não tem como trocar milhar/decimal por um format
+  string (isso exigiria configurar um *locale* D3 no embed, que o
+  `st.altair_chart` não expõe) — pré-formatar a string em Python e tratar
+  como texto é o jeito confiável, já usado desde a sessão de 09-11 na
+  tabela "Todos os motivos".
+- Todas as tabelas (`NumberColumn` → coluna já formatada + `column_config`
+  só com o rótulo) e todos os gráficos (tooltip + rótulo em cima da barra)
+  do Painel, Anatomia, Itens a vencer e das telas ocultas (Motivos,
+  Evitável, Regras) passaram por essa troca.
+- `core.frase_diagnostico`: os `.2f` da taxa/meta agora trocam `.`→`,`.
+- **Achado no caminho:** 2 gráficos tinham a *mesma* string de título no
+  eixo (`title="R$"`) e na tooltip customizada — title duplicado colide na
+  descrição de acessibilidade do Vega-Lite (não afeta o hover visual, mas
+  por clareza os títulos da tooltip viraram "R$ perda"/"R$ no mês").
+
+**Limitação conhecida, avisada ao Gabriel:** os **números dos eixos** dos
+gráficos (as marcações de escala, tipo "20,000" no eixo X) continuam no
+padrão americano — trocar isso exigiria configurar um *locale* D3 global no
+Vega, que o `st.altair_chart` do Streamlit não expõe hoje. Só os valores
+que aparecem em tabelas, tooltips (ao passar o mouse) e rótulos em cima das
+barras foram corrigidos — que é o que normalmente se lê.
+
+Verificado no app rodando (Chrome, via árvore de acessibilidade dos
+gráficos): tooltips mostram "taxa %: 1,23", "perda: R$ 36.066", "R$ perda:
+388.455", etc. — todos com separador pt-BR correto. `streamlit.testing`
+smoke test: 0 exceções.
+
 ## CONCLUÍDO NESTA SESSÃO (2026-09-12, continuação — bug de alinhamento na Anatomia)
 
 Gabriel reparou que na "Anatomia da perda", bloco "Todos os motivos no
