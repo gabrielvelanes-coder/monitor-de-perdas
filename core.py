@@ -453,20 +453,20 @@ def enriquecer_a_vencer(av: pd.DataFrame, cad: pd.DataFrame | None) -> pd.DataFr
             return "Sem data"
         if d <= 30:
             return "Até 30 dias"
-        if d <= 60:
-            return "31 a 60 dias"
         if d <= 90:
-            return "61 a 90 dias"
+            return "Até 90 dias"
         if d <= 180:
-            return "91 a 180 dias"
-        return "Mais de 180 dias"
+            return "Até 180 dias"
+        if d <= 365:
+            return "Até 12 meses"
+        return "Mais de 12 meses"
 
     m["urgencia"] = m["dias_venc"].map(_faixa_urgencia)
     return m
 
 
-ORDEM_URGENCIA = ["Até 30 dias", "31 a 60 dias", "61 a 90 dias", "91 a 180 dias",
-                  "Mais de 180 dias", "Sem data"]
+ORDEM_URGENCIA = ["Até 30 dias", "Até 90 dias", "Até 180 dias", "Até 12 meses",
+                  "Mais de 12 meses", "Sem data"]
 
 
 # ----------------------------------------------------------------------------- #

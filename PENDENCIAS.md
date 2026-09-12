@@ -1,5 +1,39 @@
 # Pendências e histórico — Monitor de Perdas
 
+## CONCLUÍDO NESTA SESSÃO (2026-09-12)
+
+Lista de 5 pedidos do Gabriel, resolvidos um a um (a lista virou seção
+"PENDENTE" abaixo pro que ainda falta — item 5).
+
+**1. Itens a vencer — faixas de urgência viraram cumulativas.** `core.py`:
+`_faixa_urgencia`/`ORDEM_URGENCIA` trocaram os baldes exclusivos antigos
+(Até 30 / 31-60 / 61-90 / 91-180 / Mais de 180 dias) pelos novos, pedidos
+pelo Gabriel: **Até 30 dias / Até 90 dias / Até 180 dias / Até 12 meses /
+Mais de 12 meses** (+ Sem data). `app.py`: KPI "Vence em até 90 dias"
+ajustado pra somar os baldes novos.
+
+**2. Painel — perda passa a somar todos os motivos por padrão, com filtro.**
+Gabriel formalizou o entendimento: **perda = toda baixa do sistema**,
+independente do motivo (marketing, reembolso, consumo, doação também contam
+— não só vencido/danificado/furto/descontinuado) — mas ele ainda precisa
+enxergar os motivos individualmente pra achar gargalos (por isso a "Bridge
+de escopo" e "Top motivos" continuam na tela). `ESCOPO_PADRAO` (`app.py`)
+virou `"todos"` (era `"vencido"`). `tela_veredito` ganhou de volta um
+seletor **"Escopo da perda"** (segmented control: Vencido / Perda real /
+Todos os motivos, default Todos os motivos) — a taxa do topo, o gráfico de
+evolução e o ranking de lojas recalculam com o escopo escolhido. Testado no
+browser: Todos os motivos → 0,66% (R$ 463.227); Vencido → 0,53%
+(R$ 368.815, bate com o número de antes da mudança).
+
+**3. Removido o texto "A perda é aceitável? · escopo: ... · recorte
+global: ... · fonte ..."** do topo do Painel (poluía ao lado do novo
+seletor de escopo).
+
+**4. Menu "Motivos" ocultado.** Gabriel pediu pra não mexer nele por
+enquanto (a tela ainda existe no código, comentada em `st.navigation`,
+igual Evitável/Regras). Menu agora tem só 3 itens: Painel · Anatomia da
+perda · Itens a vencer. Docstring do topo do `app.py` atualizada.
+
 ## CONCLUÍDO NESTA SESSÃO (2026-09-11, continuação)
 
 ### Correção: "Itens a vencer" usava a coluna errada para o valor exposto
@@ -96,6 +130,15 @@ onde 20 lidera) — vale olhar se é fruto de uma compra/transferência recente
 que ainda dá tempo de agir.
 
 ## PENDENTE
+
+### 0. Anatomia — clique num gráfico não limpa a seleção de outro (5º pedido, 2026-09-12)
+Gabriel gostou da interatividade dos gráficos "Categoria" e "Curva" + tabela,
+só perguntou se dá pra melhorar o caso de filtrar um gráfico e depois filtrar
+outro sem precisar clicar "Limpar filtros dos gráficos" antes — ele mesmo
+disse que não tem problema se for assim mesmo. Investigando (`alt.selection_point`
+com `toggle="true"` em cada um dos 3 gráficos, filtros combinados em AND na
+tabela) — perguntei pra ele qual cenário exato incomoda antes de mexer, pra
+não quebrar o "clique de novo solta" que ele pediu antes.
 
 ### 1. Faturamento de setembro/2026 — ÚNICA PENDÊNCIA ABERTA
 `faturamento.csv` vai até **2026-08**. Setembro ainda não fechou (dado de perda

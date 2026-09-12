@@ -2,12 +2,16 @@
 Monitor de Perdas — Grupo Velanes
 streamlit run app.py
 
-Cinco telas (título = rótulo do menu), cada uma responde uma pergunta:
-  1. Painel ............... a perda é aceitável?
-  2. Motivos .............. o que é perda de verdade e o que não é? (de-para c/ o BI)
-  3. Anatomia da perda .... o que são esses itens? (medicamento? curva? giro? motivo?)
-  4. Evitável x estrutural  estou dando perda em item que vende?
-  5. Regras e simulação ... o que mudar e quanto economiza
+Três telas visíveis (título = rótulo do menu), cada uma responde uma pergunta:
+  1. Painel ............... a perda é aceitável? (escopo escolhível: vencido /
+                             perda real / todos os motivos — perda = toda
+                             baixa do sistema, por padrão)
+  2. Anatomia da perda .... o que são esses itens? (medicamento? curva? giro? motivo?)
+  3. Itens a vencer ....... o que ainda dá pra vender antes de perder?
+
+Ocultas (código fica no arquivo, só comentado em `st.navigation` — reativar
+descomentando): Motivos (de-para c/ o BI), Evitável x estrutural, Regras e
+simulação.
 """
 from __future__ import annotations
 
@@ -35,7 +39,7 @@ COR = {"ok": "#34D399", "atencao": "#FBBF24", "critico": "#F87171", "sem_dados":
 COR_BALDE = {"pdv": "#34D399", "compra": "#FB923C", "cadastro": "#F87171", "sem_cadastro": "#94A3B8"}
 CLASSE_COR = {"Vencido": "#F87171", "Outra perda real": "#FB923C", "Não é perda": "#94A3B8"}
 
-ESCOPO_PADRAO = "vencido"
+ESCOPO_PADRAO = "todos"  # perda = toda baixa do sistema; Painel deixa trocar
 META_PADRAO = 0.004  # 0,40% do faturamento
 
 
@@ -317,13 +321,21 @@ def _vclass_recorte(cats):
 # =========================================================================== #
 def tela_veredito():
     st.title("Painel")
-    esc, meta, incluir_dep = CTX["escopo"], CTX["meta"], CTX["incluir_dep"]
-    st.caption(f"A perda é aceitável? · escopo: {core.ESCOPOS[esc]} · recorte global: "
-               f"{_recorte_txt()} · fonte `{CTX['fonte']}`")
+    meta, incluir_dep = CTX["meta"], CTX["incluir_dep"]
 
-    # ---- filtros da tela: mês e loja (dentro do recorte global) --------- #
+    # ---- filtros da tela: escopo, mês e loja (dentro do recorte global) - #
     perdas, fat = CTX["perdas"], CTX["fat"]
-    c_mes, c_loja = st.columns(2)
+    c_esc, c_mes, c_loja = st.columns([1.3, 1, 1])
+    esc_rot = c_esc.segmented_control(
+        "Escopo da perda", ["Vencido", "Perda real", "Todos os motivos"],
+        default="Todos os motivos", key="pnl_escopo",
+        help="O que conta como 'perda' no cálculo da taxa. 'Todos os motivos' "
+             "soma toda baixa do sistema (marketing, reembolso, consumo, "
+             "doação, vencido, danificado, furto, descontinuado...); "
+             "'Perda real' tira marketing/reembolso/consumo/doação; "
+             "'Vencido' é só produto vencido.") or "Todos os motivos"
+    esc = {"Vencido": "vencido", "Perda real": "perda_real",
+           "Todos os motivos": "todos"}[esc_rot]
     msel = _mes_local(perdas, "pnl_meses", c_mes)
     if msel:
         perdas = perdas[perdas["ano_mes"].isin(msel)]
@@ -1155,7 +1167,7 @@ def tela_itens_a_vencer():
     tot_valor = enr["valor_exposto"].sum()
     tot_estoque = enr["estoque_pos"].sum()
     ate_30 = enr.loc[enr["urgencia"] == "Até 30 dias", "valor_exposto"].sum()
-    ate_90 = enr.loc[enr["urgencia"].isin(["Até 30 dias", "31 a 60 dias", "61 a 90 dias"]),
+    ate_90 = enr.loc[enr["urgencia"].isin(["Até 30 dias", "Até 90 dias"]),
                      "valor_exposto"].sum()
     with st.container(horizontal=True):
         st.metric("Estoque exposto (valor)", BRLc(tot_valor) if tem_valor else NUM(tot_estoque),
@@ -1225,11 +1237,11 @@ def tela_itens_a_vencer():
 # --------------------------------------------------------------------------- #
 nav = st.navigation([
     st.Page(tela_veredito, title="Painel", icon=":material/speed:", default=True),
-    st.Page(tela_motivos, title="Motivos", icon=":material/category:"),
     st.Page(tela_anatomia, title="Anatomia da perda", icon=":material/account_tree:"),
     st.Page(tela_itens_a_vencer, title="Itens a vencer", icon=":material/hourglass_empty:"),
-    # ocultas a pedido (2026-09-11) — reativar bastando descomentar:
-    # st.Page(tela_baldes, title="Evitável x estrutural", icon=":material/rule:"),
-    # st.Page(tela_regras, title="Regras e simulação", icon=":material/tune:"),
+    # ocultas a pedido — reativar bastando descomentar:
+    # st.Page(tela_motivos, title="Motivos", icon=":material/category:"),  # 2026-09-12
+    # st.Page(tela_baldes, title="Evitável x estrutural", icon=":material/rule:"),  # 2026-09-11
+    # st.Page(tela_regras, title="Regras e simulação", icon=":material/tune:"),  # 2026-09-11
 ])
 nav.run()

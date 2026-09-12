@@ -10,16 +10,17 @@ Visíveis no menu:
 
 | Tela | Pergunta que responde |
 |---|---|
-| **Painel** | A perda é aceitável? 4 KPIs (faturamento · perda no escopo · taxa ponderada · gap vs meta), semáforo + diagnóstico automático, evolução mensal vs meta, ranking de lojas por taxa, bridge de escopo, top motivos. |
-| **Motivos** | O que é o quê? De-para de cada motivo de baixa: R$, % do faturamento, % do lançado, e se é perda de verdade (Vencido / Outra perda real / Não é perda). Explica a diferença entre a taxa da ferramenta e o `%perda/fat` do Power BI. |
+| **Painel** | A perda é aceitável? Escopo escolhível na própria tela (**Vencido / Perda real / Todos os motivos** — perda = toda baixa do sistema por padrão). 4 KPIs (faturamento · perda no escopo · taxa ponderada · gap vs meta), semáforo + diagnóstico automático, evolução mensal vs meta, ranking de lojas por taxa, bridge de escopo (3 recortes lado a lado), top motivos. |
 | **Anatomia da perda** | O que são esses itens? Abre em **Todos os motivos** e traz um bloco fixo "Todos os motivos no recorte" (R$/unid/linhas/produtos por motivo). Escopo Vencido / Perda real / Todos + motivos específicos. Medicamento × não-medicamento × sem classificação, por categoria da árvore, por curva de quantidade (**Com giro A–H** / **Sem giro I**), por **tempo da última venda** (até 90 / até 180 / acima de 180 dias). Os 3 gráficos são clicáveis e filtram a tabela de produtos (uma linha por produto **e motivo**). |
-| **Itens a vencer** | **Saldo do pré-vencido** (o que resta do lote a vencer, não o estoque geral) com data de validade, por loja — para agir antes de virar perda. KPIs de valor exposto por urgência (≤30 / ≤90 dias), gráfico por urgência e por loja, tabela com lote/validade/curva. Cruza com o DADOS só para trazer custo médio (valor = saldo × custo). |
+| **Itens a vencer** | **Saldo do pré-vencido** (o que resta do lote a vencer, não o estoque geral) com data de validade, por loja — para agir antes de virar perda. Urgência em 4 faixas cumulativas: **Até 30 / 90 / 180 dias / 12 meses**. KPIs de valor exposto por urgência, gráfico por urgência e por loja, tabela com lote/validade/curva. Cruza com o DADOS só para trazer custo médio (valor = saldo × custo). |
 
 Ocultas do menu (código continua em `app.py`, é só remover o comentário de
-`st.navigation` para reativar): **Evitável × estrutural** (4 baldes — PDV /
-excesso de compra / item suspenso / fora do mix — com ação por item) e
-**Regras e simulação** (simula teto de estoque por curva/categoria e estima
-economia/mês).
+`st.navigation` para reativar): **Motivos** (de-para de cada motivo de baixa
+com % do faturamento e classe Vencido/Outra perda real/Não é perda — pausada
+a pedido do Gabriel, sem mexer por ora), **Evitável × estrutural** (4 baldes
+— PDV / excesso de compra / item suspenso / fora do mix — com ação por item)
+e **Regras e simulação** (simula teto de estoque por curva/categoria e
+estima economia/mês).
 
 ## Filtros
 
