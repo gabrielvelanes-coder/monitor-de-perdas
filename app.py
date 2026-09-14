@@ -1243,7 +1243,7 @@ def tela_itens_a_vencer():
                    "pré-vencido) como aproximação.")
     enr = core.enriquecer_precos(enr)
 
-    c_reg, c_loja, c_urg = st.columns(3)
+    c_reg, c_loja, c_urg, c_faixa = st.columns(4)
     regsel = _regional_local(enr, "av_regional", c_reg)
     if regsel:
         enr = _filtra_regional(enr, regsel)
@@ -1256,6 +1256,14 @@ def tela_itens_a_vencer():
                                 key="av_urgencia", placeholder="todas as faixas")
     if urg_sel:
         enr = enr[enr["urgencia"].isin(urg_sel)]
+    # faixa de PREÇO (30/60/90/120) — diferente da Urgência acima: é a
+    # mesma faixa dos 4 arquivos do ERP, não a de visualização geral.
+    rot_faixa = {f: f"{f} dias" for f in core.FAIXAS_PRECO}
+    faixa_sel = c_faixa.multiselect(
+        "Faixa de preço", core.FAIXAS_PRECO, default=[], key="av_faixa_preco",
+        format_func=lambda f: rot_faixa[f], placeholder="todas as faixas")
+    if faixa_sel:
+        enr = enr[enr["faixa_preco"].isin(faixa_sel)]
     if enr.empty:
         st.info("Sem itens nesse recorte.", icon=":material/info:")
         return
