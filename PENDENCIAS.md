@@ -1,12 +1,15 @@
 # Pendências e histórico — Monitor de Perdas
 
-## RETOMAR DAQUI (fim da sessão 2026-09-12)
+## RETOMAR DAQUI (fim da sessão 2026-09-14)
 
 Tudo commitado, working tree limpa, app rodando em `localhost:8501` com o
-código mais recente. Duas frentes em aberto pra continuar:
+código mais recente. Frentes em aberto pra continuar:
 
 1. **Faturamento de setembro/2026** — só quando o mês fechar (ver
-   [PENDENTE #1](#1-faturamento-de-setembro2026) mais abaixo).
+   [PENDENTE #1](#1-faturamento-de-setembro2026) mais abaixo). Não é bug:
+   testado com uma loja específica sem filtro de mês, jan–ago aparecem
+   normais, só set/26 cai no aviso "Meses sem faturamento informado" —
+   esperado, faturamento.csv não tem setembro ainda.
 2. **Regra de preço do pré-vencido** — planejamento em andamento (seção
    [PLANEJAMENTO](#planejamento--regra-de-precificação-do-pré-vencido-2026-09-12)
    logo abaixo), esperando o Gabriel responder:
@@ -17,14 +20,19 @@ código mais recente. Duas frentes em aberto pra continuar:
      dias (custo×1,10) até 150?
    - Regra vale igual pra **medicamento** (preço-teto CMED/ANVISA)?
    - Extensão/nome esperado do arquivo de importação do ERP.
-   - **Só depois de fechar isso tudo**: implementar `sugerir_preco()` +
+   - **Novo (14/09/26): não é 1 arquivo, são 4** — Gabriel disse "4
+     cadernos de oferta", esclareceu que são **4 arquivos de preço, cada
+     um com o layout do próprio sistema** (não confundir com os 4
+     fabricantes do outro projeto, [[projeto-apuracao-trade]]/
+     painel-ofertas — são conceitos homônimos, mas times diferentes).
+     Ainda não sei o que diferencia os 4 (tipo de registro? propósito?
+     um por faixa de dias?) nem o layout de cada um — pedi pra ele
+     mandar os 4 (print/exemplo, como fez com o `A|EAN|||PREÇO` antes).
+   - **Só depois de fechar tudo isso**: implementar `sugerir_preco()` +
      `exportar_erp_precos()` em `core.py` — Gabriel foi explícito que quer
      só planejar por enquanto, não mexer no código ainda.
 
-Sem nenhuma outra pendência de código aberta — os 6 itens pedidos nesta
-sessão (números pt-BR, explicações de UI, ocultar "Fontes de dados",
-remover "Bater com a reunião", planejar preço do pré-vencido, filtro
-Regional) foram resolvidos ou documentados como planejamento.
+Sem nenhuma outra pendência de código aberta.
 
 ---
 
@@ -405,12 +413,21 @@ se prefere outra regra de desempate (ex. média ponderada pelo saldo).
    faixas de urgência já usadas na tela (30/90/180/365) — tudo bem terem
    propósitos diferentes (uma é pra agrupar/visualizar, a outra pra
    precificar), só registrando que não são a mesma coisa.
+5. **(14/09/26) São 4 arquivos, não 1.** Até aqui o plano assumia "um
+   arquivo único pra rede toda" (layout `A|EAN|||PREÇO`, confirmado numa
+   sessão anterior). Gabriel corrigiu: são **4 arquivos de preço, cada
+   um no layout do sistema** — não disse ainda o que diferencia os 4
+   (tipo de registro do ERP? uma faixa de dias por arquivo? outra coisa?)
+   nem mandou o layout de cada um. Pedido a ele mandar os 4 (print ou
+   exemplo de arquivo) antes de mexer em `exportar_erp_precos()` — o
+   layout `A|EAN|||PREÇO` documentado abaixo pode ser só 1 dos 4, não
+   necessariamente o padrão de todos.
 
-Quando o Gabriel der sinal verde: `core.py` ganha `sugerir_preco(dias_venc,
-custo_medio) -> preco_sugerido` (a regra da tabela acima) + `exportar_erp_precos(df)
--> str` que agrupa por EAN (pegando o lote mais urgente de cada produto, a
-confirmar), e gera o texto no layout `A|EAN|||PREÇO` — um arquivo só, pra
-rede toda, 4 casas decimais.
+Quando o Gabriel der sinal verde (e os 4 layouts estiverem claros):
+`core.py` ganha `sugerir_preco(dias_venc, custo_medio) -> preco_sugerido`
+(a regra da tabela acima) + `exportar_erp_precos(df)` — a forma exata
+(1 função por arquivo? 1 função que devolve os 4?) depende do que
+diferencia os 4 layouts, ainda não sei.
 
 ## PENDENTE
 
