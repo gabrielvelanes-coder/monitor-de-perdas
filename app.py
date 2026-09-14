@@ -137,8 +137,11 @@ def _achar(*padroes):
 # contexto: roda a cada rerun, monta sidebar e carrega tudo
 # --------------------------------------------------------------------------- #
 def build_context() -> dict:
-    st.sidebar.markdown("### :material/monitoring: Monitor de Perdas")
-    st.sidebar.caption("Grupo Velanes")
+    # st.logo (não st.sidebar.markdown) de propósito: é o único jeito do
+    # Streamlit garantir isso ACIMA do menu de navegação (st.navigation
+    # sempre reserva o topo da sidebar pro menu, não dá pra "furar a fila"
+    # com markdown normal, mesmo chamando antes no script).
+    st.logo(str(PASTA / "assets" / "logo.svg"), size="large")
 
     up_p = up_c = up_cat = up_f = up_av = None
     if MOSTRAR_FONTES_DADOS:
