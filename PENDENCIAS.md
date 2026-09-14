@@ -5,18 +5,6 @@
 Tudo commitado, working tree limpa, app rodando em `localhost:8501` com o
 código mais recente. Frentes em aberto pra continuar:
 
-0. **Confirmar com o Gabriel: clique-na-linha da tabela "Produtos"
-   (Anatomia) volta a funcionar?** 3ª rodada nessa interação — 1ª
-   (clique, commit `1fdaf48`) ele testou e "não apareceu nada"; 2ª
-   (selectbox, commit `89699fe`) ele não gostou do modelo, quer clique
-   mesmo; 3ª (`c14895b`, atual) é clique de novo, mas com instrução
-   explícita de clicar no quadradinho (não na linha/texto) e o painel
-   movido pra logo abaixo da tabela (pode ter passado batido rolando a
-   tela da vez que "não apareceu nada"). **Não confirmado ao vivo** —
-   minha automação do Chrome não consegue acertar esse checkbox de
-   canvas (2 tentativas, mesma limitação). Pedir ao Gabriel pra testar
-   de novo com a instrução na tela.
-
 1. **Faturamento de setembro/2026** — só quando o mês fechar (ver
    [PENDENTE #1](#1-faturamento-de-setembro2026) mais abaixo). Não é bug:
    testado com uma loja específica sem filtro de mês, jan–ago aparecem
@@ -55,20 +43,20 @@ cada barra sobre o total do próprio gráfico, junto do R$/unidades —
 gráficos do app). Tudo verificado ao vivo no Chrome, não só por teste
 automatizado.
 
-**Tabela "Produtos" (Anatomia) — 3 rodadas de interação (14/09/26):**
-1ª: clique-na-linha via `st.dataframe(on_select="rerun")` — Gabriel
-testou, "não apareceu nada". 2ª: trocado por `st.selectbox` (widget
-comum, testado e funcionando ao vivo no Chrome selecionando "WEGOVY
-1,7MG SOL INJ") — mas Gabriel não gostou do modelo, quer clique mesmo.
-3ª (estado atual, `c14895b`): **volta ao clique-na-linha**, com 2
-ajustes pra tentar resolver o "não apareceu nada" de antes: caption
-explícito mandando clicar no quadradinho (não na linha/texto — só o
-quadradinho de fato seleciona, clicar em qualquer célula só foca ela,
-sempre funciona e não indica seleção real) e o painel de mês/loja movido
-pra logo depois da tabela (antes ficava depois de "Baixar (CSV)",
-suspeita de ter passado batido). **Ainda não confirmado ao vivo** — ver
-item 0 do "RETOMAR DAQUI" no topo. Coluna "Status catálogo" removida
-(ficou assim nas 3 rodadas).
+**Tabela "Produtos" (Anatomia) — 3 rodadas de interação, FECHADA
+(14/09/26):** 1ª: clique-na-linha via `st.dataframe(on_select="rerun")`
+— Gabriel testou, "não apareceu nada" (causa provável: clicou na linha/
+texto, que só foca a célula, não no quadradinho de seleção — e o painel
+ficava depois de "Baixar (CSV)", podia ter passado batido rolando).
+2ª: trocado por `st.selectbox` (funcionou ao vivo, testei), mas Gabriel
+não gostou do modelo, queria clique mesmo. 3ª (estado final, `c14895b`):
+**volta ao clique-na-linha**, com caption explícito mandando clicar no
+quadradinho e o painel movido pra logo depois da tabela — **Gabriel
+confirmou que funciona** ("está funcionando"). Coluna "Status catálogo"
+removida (ficou assim nas 3 rodadas). **Lição pro app:** `st.dataframe`
+com seleção de linha funciona bem desde que (a) a instrução deixe claro
+que é o quadradinho que seleciona, não a linha/célula, e (b) o resultado
+apareça o mais perto possível da tabela, sem exigir rolar a tela.
 
 Sem nenhuma outra pendência de código aberta.
 
