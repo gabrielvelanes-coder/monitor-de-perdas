@@ -22,16 +22,14 @@ código mais recente. Frentes em aberto pra continuar:
    selecionado na venda) **e** a dúvida da faixa 121–150 (não existe:
    confirmado que acima de 120 dias não entra em nenhum caderno, fica
    no preço normal da loja).
+   **Layout confirmado (14/09/26): `A|EAN|||PREÇO`** (4 pipes, 2 campos
+   vazios) — o print de 2 pipes era só compressão visual, Gabriel bateu o
+   martelo: "A|EAN|||PREÇO ESSE É O CORRETO". Os 4 arquivos usam esse
+   mesmo layout de linha, só o conjunto de itens/preço muda por faixa.
    Ainda em aberto:
-   - **Layout exato dos 4 arquivos** — o print mais recente mostra
-     `A|EAN|PREÇO` (2 pipes), mas o layout confirmado antes era
-     `A|EAN|||PREÇO` (4 pipes, 2 campos vazios). Pedido ao Gabriel pra
-     colar o texto puro de 1 linha (não print) pra eliminar qualquer
-     dúvida de caractere invisível — **não implementar sem essa
-     confirmação**, formato errado quebra a importação no ERP.
    - Regra vale igual pra **medicamento** (preço-teto CMED/ANVISA)?
    - Extensão/nome esperado de cada um dos 4 arquivos.
-   - **Só depois de fechar tudo isso**: implementar `sugerir_preco()` +
+   - **Só depois de fechar isso**: implementar `sugerir_preco()` +
      `exportar_erp_precos()` em `core.py` — Gabriel foi explícito que quer
      só planejar por enquanto, não mexer no código ainda.
 
@@ -380,45 +378,48 @@ têm lote pré-vencido naquela faixa e o preço daquela faixa.
   existem; confirmado que acima de 120 dias não entra em nenhum arquivo,
   fica no preço normal da loja.
 
-**Layout — AINDA NÃO CONFIRMADO, discrepância a resolver antes de
-implementar.** Gabriel mandou um print novo (14/09/26) com linhas assim:
+**Layout — CONFIRMADO (14/09/26): `A|EAN|||PREÇO`.** O print de 2 pipes
+(`A|4005900664006|29.2500`) era só compressão visual do print — Gabriel
+confirmou por escrito: "A|EAN|||PREÇO ESSE É O CORRETO". Uma linha por
+item, campos separados por `|`, sem cabeçalho, 4 pipes (2 campos vazios
+no meio):
 
 ```
-A|4005900664006|29.2500
-A|4005808850617|29.2500
-A|7500435146258|86.3700
+A|<EAN>|||<PREÇO>
 ```
 
-Isso é só **2 pipes** (`A|EAN|PREÇO`), mas o layout confirmado numa sessão
-anterior (10/09 ou 11/09) tinha **4 pipes** (`A|EAN|||PREÇO`, 2 campos
-vazios no meio — exemplo: `A|7894913003073|||38.9700`). Pedido ao Gabriel
-pra colar o **texto puro** (não print) de uma linha, porque print pode
-comprimir/cortar caractere e isso quebra a importação no ERP se eu chutar
-errado. Até isso vir, **não implementar** `exportar_erp_precos()`.
+Exemplo real (sessão anterior):
+```
+A|7894913003073|||38.9700
+A|7894913003066|||38.9700
+A|7896023707100|||89.9500
+```
 
-O que já dá pra fixar independente do layout exato:
 - Campo 1: `A` = **"Preço"** (tipo de registro — confirmado pelo Gabriel).
-- EAN = código de barras, já temos essa coluna no relatório de itens a
-  vencer (`cod_barras` em `core._AVENCER_MAP`).
-- Preço: ponto como decimal, **4 casas** (`38.9700`, não `38.97`), sem
-  separador de milhar — consistente nos 2 prints que ele mandou.
+- Campo 2: **EAN** (código de barras) — já temos essa coluna no relatório
+  de itens a vencer (`cod_barras` em `core._AVENCER_MAP`).
+- Campos 3 e 4: sempre vazios — só reproduzir a estrutura `|||`.
+- Campo 5 (**preço**): ponto como decimal, sempre **4 casas** (`38.9700`,
+  não `38.97`), sem separador de milhar.
+- Os **4 arquivos usam o mesmo layout de linha** — só muda o conjunto de
+  itens (os que têm lote na faixa daquele caderno) e o preço (a fórmula
+  da faixa).
 
 **Em aberto, ainda preciso fechar antes de implementar:**
-1. **Layout exato dos 4 arquivos** (2 pipes ou 4 pipes) — ver acima,
-   bloqueante.
-2. **Extensão/nome esperado de cada um dos 4 arquivos** (`.txt`? sem
+1. **Extensão/nome esperado de cada um dos 4 arquivos** (`.txt`? sem
    extensão? nome que identifique a faixa, tipo `preco_30dias.txt`?).
-3. **Regra é igual pra medicamento e não-medicamento?** Medicamento tem
+2. **Regra é igual pra medicamento e não-medicamento?** Medicamento tem
    preço-teto regulado (CMED/ANVISA — PMC), mas isso não impede desconto
    pra baixo; vale confirmar se não há alguma trava própria da rede antes
    de aplicar desconto abaixo do custo em medicamento.
-4. As faixas de dias da regra (30/60/90/120) são **diferentes** das
+3. As faixas de dias da regra (30/60/90/120) são **diferentes** das
    faixas de urgência já usadas na tela (30/90/180/365) — tudo bem terem
    propósitos diferentes (uma é pra agrupar/visualizar, a outra pra
    precificar), só registrando que não são a mesma coisa.
 
-Quando o Gabriel der sinal verde (e o layout dos 4 arquivos estiver
-confirmado): `core.py` ganha `sugerir_preco(dias_venc, custo_medio) ->
+Layout já confirmado — falta só medicamento + nome dos arquivos (itens 1-2
+acima) e o sinal verde do Gabriel pra implementar. Quando vier: `core.py`
+ganha `sugerir_preco(dias_venc, custo_medio) ->
 preco_sugerido` (a regra da tabela acima) + `exportar_erp_precos(df) ->
 dict[str, str]` — 1 texto por faixa (4 saídas), cada um filtrando os itens
 daquela faixa e reaproveitando o mesmo formato de linha pras 4.
