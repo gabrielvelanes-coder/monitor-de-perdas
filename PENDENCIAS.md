@@ -5,6 +5,18 @@
 Tudo commitado, working tree limpa, app rodando em `localhost:8501` com o
 código mais recente. Frentes em aberto pra continuar:
 
+0. **Confirmar com o Gabriel: clique-na-linha da tabela "Produtos"
+   (Anatomia) volta a funcionar?** 3ª rodada nessa interação — 1ª
+   (clique, commit `1fdaf48`) ele testou e "não apareceu nada"; 2ª
+   (selectbox, commit `89699fe`) ele não gostou do modelo, quer clique
+   mesmo; 3ª (`c14895b`, atual) é clique de novo, mas com instrução
+   explícita de clicar no quadradinho (não na linha/texto) e o painel
+   movido pra logo abaixo da tabela (pode ter passado batido rolando a
+   tela da vez que "não apareceu nada"). **Não confirmado ao vivo** —
+   minha automação do Chrome não consegue acertar esse checkbox de
+   canvas (2 tentativas, mesma limitação). Pedir ao Gabriel pra testar
+   de novo com a instrução na tela.
+
 1. **Faturamento de setembro/2026** — só quando o mês fechar (ver
    [PENDENTE #1](#1-faturamento-de-setembro2026) mais abaixo). Não é bug:
    testado com uma loja específica sem filtro de mês, jan–ago aparecem
@@ -43,16 +55,20 @@ cada barra sobre o total do próprio gráfico, junto do R$/unidades —
 gráficos do app). Tudo verificado ao vivo no Chrome, não só por teste
 automatizado.
 
-**Tabela "Produtos" (Anatomia) — 2ª rodada (14/09/26):** 1ª tentativa foi
-clique-na-linha via `st.dataframe(on_select="rerun")`, mas Gabriel testou
-e não funcionou ("não gostei desse modelo") — clique em checkbox de grid
-canvas provou frágil (nem `streamlit.testing` simula, nem o clique real
-dele funcionou). **Trocado por um `st.selectbox`** com a lista de
-produtos do recorte — widget comum, sem depender de acertar um checkbox
-minúsculo; ao escolher um produto, mostra mês/loja/motivo num painel
-abaixo. Coluna **"Status catálogo"** removida também (pedido junto).
-Verificado ao vivo no Chrome: selecionar "WEGOVY 1,7MG SOL INJ" mostrou
-corretamente o detalhe por mês/loja.
+**Tabela "Produtos" (Anatomia) — 3 rodadas de interação (14/09/26):**
+1ª: clique-na-linha via `st.dataframe(on_select="rerun")` — Gabriel
+testou, "não apareceu nada". 2ª: trocado por `st.selectbox` (widget
+comum, testado e funcionando ao vivo no Chrome selecionando "WEGOVY
+1,7MG SOL INJ") — mas Gabriel não gostou do modelo, quer clique mesmo.
+3ª (estado atual, `c14895b`): **volta ao clique-na-linha**, com 2
+ajustes pra tentar resolver o "não apareceu nada" de antes: caption
+explícito mandando clicar no quadradinho (não na linha/texto — só o
+quadradinho de fato seleciona, clicar em qualquer célula só foca ela,
+sempre funciona e não indica seleção real) e o painel de mês/loja movido
+pra logo depois da tabela (antes ficava depois de "Baixar (CSV)",
+suspeita de ter passado batido). **Ainda não confirmado ao vivo** — ver
+item 0 do "RETOMAR DAQUI" no topo. Coluna "Status catálogo" removida
+(ficou assim nas 3 rodadas).
 
 Sem nenhuma outra pendência de código aberta.
 
