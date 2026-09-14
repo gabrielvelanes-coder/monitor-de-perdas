@@ -345,14 +345,15 @@ ideia é a ferramenta já **sugerir o preço com desconto** por item, em vez de
 só mostrar o valor exposto. Pediu **só planejar por enquanto — não
 implementar ainda**.
 
-**Regra de desconto (definida pelo Gabriel, por dias até vencer):**
+**Regra de desconto (definida pelo Gabriel, por dias até vencer —
+corrigida em 14/09/26, valores de 60 e 120 dias mudaram):**
 
 | Até (dias) | Preço sugerido |
 |---|---|
-| 30 | custo × 0,75 (25% de desconto sobre o custo) |
-| 60 | custo × 0,95 (5% de desconto sobre o custo) |
+| 30 | custo × 0,75 (25% abaixo do custo) |
+| 60 | custo × 0,85 (15% abaixo do custo) — era 0,95/5% antes, corrigido |
 | 90 | custo × 1,00 (preço de custo) |
-| 120 | custo × 1,10 (10% de markup sobre o custo) |
+| 120 | custo × 1,15 (15% de markup) — era 1,10/10% antes, corrigido |
 | acima de 120 | sem caderno — preço normal da loja (confirmado 14/09/26) |
 
 Quanto mais perto de vencer, mais agressivo o desconto (inclusive abaixo do
