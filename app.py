@@ -1248,7 +1248,7 @@ def tela_itens_a_vencer():
                    "pré-vencido) como aproximação.")
     enr = core.enriquecer_precos(enr)
 
-    c_reg, c_loja, c_urg, c_faixa = st.columns(4)
+    c_reg, c_loja, c_urg = st.columns(3)
     regsel = _regional_local(enr, "av_regional", c_reg)
     if regsel:
         enr = _filtra_regional(enr, regsel)
@@ -1261,14 +1261,6 @@ def tela_itens_a_vencer():
                                 key="av_urgencia", placeholder="todas as faixas")
     if urg_sel:
         enr = enr[enr["urgencia"].isin(urg_sel)]
-    # faixa de PREÇO (30/60/90/120) — diferente da Urgência acima: é a
-    # mesma faixa dos 4 arquivos do ERP, não a de visualização geral.
-    rot_faixa = {f: f"{f} dias" for f in core.FAIXAS_PRECO}
-    faixa_sel = c_faixa.multiselect(
-        "Faixa de preço", core.FAIXAS_PRECO, default=[], key="av_faixa_preco",
-        format_func=lambda f: rot_faixa[f], placeholder="todas as faixas")
-    if faixa_sel:
-        enr = enr[enr["faixa_preco"].isin(faixa_sel)]
     if enr.empty:
         st.info("Sem itens nesse recorte.", icon=":material/info:")
         return
@@ -1351,38 +1343,51 @@ def tela_itens_a_vencer():
                            "faixas neste recorte.")
 
     with st.container(border=True):
-        st.markdown(f"**Itens** — {NUM(len(enr))} lotes · "
-                    f"{BRLc(tot_valor) if tem_valor else NUM(tot_estoque) + ' unidades'}")
-        cols = ["loja", "produto", "lote", "saldo", "estoque_atual", "dias_venc",
-                "data_validade", "urgencia", "curva_qtd", "macro"]
-        cols = [c for c in cols if c in enr.columns]
-        if tem_valor:
-            cols.insert(cols.index("estoque_atual") if "estoque_atual" in cols else len(cols),
-                        "valor_exposto")
-            cols.insert(cols.index("urgencia") + 1 if "urgencia" in cols else len(cols),
-                        "preco_sugerido")
-        tab = (enr[cols].sort_values(
-            "valor_exposto" if tem_valor else "estoque_pos", ascending=False)
-            .head(500).reset_index(drop=True))
-        for c in ("saldo", "estoque_atual", "dias_venc"):
-            if c in tab.columns:
-                tab[c] = tab[c].map(NUM)
-        if "valor_exposto" in tab.columns:
-            tab["valor_exposto"] = tab["valor_exposto"].map(BRLc)
-        if "preco_sugerido" in tab.columns:
-            tab["preco_sugerido"] = tab["preco_sugerido"].map(
-                lambda v: "R$ " + PTNUM(v, 2) if pd.notna(v) else "—")
-        cfg = {"loja": "Loja", "produto": "Produto", "lote": "Lote",
-               "saldo": "Saldo (pré-vencido)", "estoque_atual": "Estoque atual (geral)",
-               "dias_venc": "Dias p/ vencer",
-               "data_validade": st.column_config.DateColumn("Validade", format="DD/MM/YYYY"),
-               "urgencia": "Urgência", "preco_sugerido": "Preço sugerido",
-               "curva_qtd": "Curva", "macro": "Categoria",
-               "valor_exposto": "R$ exposto"}
-        st.dataframe(tab, hide_index=True, width="stretch", height=380, column_config=cfg)
-        if len(enr) > 500:
-            st.caption(f"Mostrando as 500 maiores de {len(enr)} linhas — o CSV traz todas.")
-        st.download_button("Baixar (CSV)", enr.to_csv(index=False).encode("utf-8-sig"),
+        st.markdown("**Itens**")
+        rot_faixa = {f: f"{f} dias" for f in core.FAIXAS_PRECO}
+        faixa_sel = st.multiselect(
+            "Faixa de preço (só filtra esta tabela — cards e downloads acima continuam "
+            "no recorte de Regional/Lojas/Urgência)",
+            core.FAIXAS_PRECO, default=[], key="av_faixa_preco_tabela",
+            format_func=lambda f: rot_faixa[f], placeholder="todas as faixas")
+        enr_tab = enr[enr["faixa_preco"].isin(faixa_sel)] if faixa_sel else enr
+        if enr_tab.empty:
+            st.info("Sem itens nessa faixa.", icon=":material/info:")
+        else:
+            tot_valor_tab = enr_tab["valor_exposto"].sum()
+            tot_estoque_tab = enr_tab["estoque_pos"].sum()
+            st.caption(f"{NUM(len(enr_tab))} lotes · "
+                       f"{BRLc(tot_valor_tab) if tem_valor else NUM(tot_estoque_tab) + ' unidades'}")
+            cols = ["loja", "produto", "lote", "saldo", "estoque_atual", "dias_venc",
+                    "data_validade", "urgencia", "curva_qtd", "macro"]
+            cols = [c for c in cols if c in enr_tab.columns]
+            if tem_valor:
+                cols.insert(cols.index("estoque_atual") if "estoque_atual" in cols else len(cols),
+                            "valor_exposto")
+                cols.insert(cols.index("urgencia") + 1 if "urgencia" in cols else len(cols),
+                            "preco_sugerido")
+            tab = (enr_tab[cols].sort_values(
+                "valor_exposto" if tem_valor else "estoque_pos", ascending=False)
+                .head(500).reset_index(drop=True))
+            for c in ("saldo", "estoque_atual", "dias_venc"):
+                if c in tab.columns:
+                    tab[c] = tab[c].map(NUM)
+            if "valor_exposto" in tab.columns:
+                tab["valor_exposto"] = tab["valor_exposto"].map(BRLc)
+            if "preco_sugerido" in tab.columns:
+                tab["preco_sugerido"] = tab["preco_sugerido"].map(
+                    lambda v: "R$ " + PTNUM(v, 2) if pd.notna(v) else "—")
+            cfg = {"loja": "Loja", "produto": "Produto", "lote": "Lote",
+                   "saldo": "Saldo (pré-vencido)", "estoque_atual": "Estoque atual (geral)",
+                   "dias_venc": "Dias p/ vencer",
+                   "data_validade": st.column_config.DateColumn("Validade", format="DD/MM/YYYY"),
+                   "urgencia": "Urgência", "preco_sugerido": "Preço sugerido",
+                   "curva_qtd": "Curva", "macro": "Categoria",
+                   "valor_exposto": "R$ exposto"}
+            st.dataframe(tab, hide_index=True, width="stretch", height=380, column_config=cfg)
+            if len(enr_tab) > 500:
+                st.caption(f"Mostrando as 500 maiores de {len(enr_tab)} linhas — o CSV traz todas.")
+        st.download_button("Baixar (CSV)", enr_tab.to_csv(index=False).encode("utf-8-sig"),
                            "itens_a_vencer.csv", "text/csv", icon=":material/download:")
 
 
