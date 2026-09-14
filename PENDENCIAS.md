@@ -26,11 +26,15 @@ código mais recente. Frentes em aberto pra continuar:
    vazios) — o print de 2 pipes era só compressão visual, Gabriel bateu o
    martelo: "A|EAN|||PREÇO ESSE É O CORRETO". Os 4 arquivos usam esse
    mesmo layout de linha, só o conjunto de itens/preço muda por faixa.
-   Ainda em aberto:
-   - Regra vale igual pra **medicamento** (preço-teto CMED/ANVISA)?
-   - Extensão/nome esperado de cada um dos 4 arquivos.
-   - **Só depois de fechar isso**: implementar `sugerir_preco()` +
-     `exportar_erp_precos()` em `core.py` — Gabriel foi explícito que quer
+   **Percentuais corrigidos e regra CAMPANHA fechada (14/09/26):** 30d
+   0,75 / 60d 0,85 / 90d 1,00 / 120d 1,15 sobre o custo pra todas as
+   categorias, **exceto CAMPANHA** (categoria de nível 1 real em
+   `classif`, já identificável via `core._arvore_niveis`) que é markup
+   crescente: 30d 1,30 / 60d 1,40 / 90d 1,50 / 120d 1,60. Isso também
+   fechou a dúvida do medicamento (sem exceção, é regra padrão).
+   **Único ponto ainda bloqueante:** nome/extensão de cada um dos 4
+   arquivos. Assim que vier: implementar `sugerir_preco()` +
+   `exportar_erp_precos()` em `core.py` — Gabriel foi explícito que quer
      só planejar por enquanto, não mexer no código ainda.
 
 Sem nenhuma outra pendência de código aberta.
@@ -360,6 +364,34 @@ Quanto mais perto de vencer, mais agressivo o desconto (inclusive abaixo do
 custo nas 2 primeiras faixas) — prioriza girar o estoque a deixar vencer
 (perda de 100% do custo).
 
+**(14/09/26) Exceção — categoria CAMPANHA tem regra própria (markup, não
+desconto):** Gabriel: "mesma formação de preço para todas as categorias.
+com exceção para CAMPANHA." Isso também **fecha a dúvida do medicamento**
+— não tem tratamento especial, é preço padrão igual às outras categorias
+(só CAMPANHA foge da regra).
+
+| Até (dias) | Preço sugerido (CAMPANHA) |
+|---|---|
+| 30 | custo × 1,30 (30% de markup) |
+| 60 | custo × 1,40 (40% de markup) |
+| 90 | custo × 1,50 (50% de markup) |
+| 120 | custo × 1,60 (60% de markup) |
+
+Ao contrário da regra padrão, em CAMPANHA o markup **sobe** conforme
+aproxima do vencimento — inverso da lógica de "girar antes de vencer";
+provavelmente é subsidiado por outra fonte de receita (verba de
+campanha/marketing do fabricante) e não é objetivo do painel questionar
+a lógica de negócio, só implementar certo.
+
+**"CAMPANHA" já existe nos dados reais e o código já tem como
+identificar** — é categoria de nível 1 na coluna `classif` do relatório
+de itens a vencer (`ARVORE NOVA > CAMPANHA > <subcategoria>`, ex.
+"NEUROLÓGICO", "ENERGIA E FORÇA"). Testado no arquivo atual: 188 lotes
+com essa classificação. `core._arvore_niveis(classif)` já extrai o nível
+1 (`n1`) removendo o prefixo "ARVORE NOVA" — é só comparar
+`n1 == "CAMPANHA"` pra decidir qual tabela de preço usar, mesma função
+que `macro_categoria()` já usa pra medicamento/não-medicamento.
+
 **(14/09/26) São 4 cadernos = 4 arquivos, 1 por faixa de dias — não 1
 arquivo único pra rede toda como se pensava antes.** Gabriel: "temos que
 ter 4 cadernos de oferta. os preços dos 30 dias, outro para 60, outro para
@@ -408,18 +440,19 @@ A|7896023707100|||89.9500
 
 **Em aberto, ainda preciso fechar antes de implementar:**
 1. **Extensão/nome esperado de cada um dos 4 arquivos** (`.txt`? sem
-   extensão? nome que identifique a faixa, tipo `preco_30dias.txt`?).
-2. **Regra é igual pra medicamento e não-medicamento?** Medicamento tem
-   preço-teto regulado (CMED/ANVISA — PMC), mas isso não impede desconto
-   pra baixo; vale confirmar se não há alguma trava própria da rede antes
-   de aplicar desconto abaixo do custo em medicamento.
+   extensão? nome que identifique a faixa, tipo `preco_30dias.txt`?) —
+   **único ponto bloqueante que resta.**
+2. ~~Regra é igual pra medicamento?~~ **Respondido (14/09/26):** mesma
+   formação de preço pra todas as categorias, sem exceção pra
+   medicamento — só CAMPANHA foge da regra (ver tabela acima).
 3. As faixas de dias da regra (30/60/90/120) são **diferentes** das
    faixas de urgência já usadas na tela (30/90/180/365) — tudo bem terem
    propósitos diferentes (uma é pra agrupar/visualizar, a outra pra
    precificar), só registrando que não são a mesma coisa.
 
-Layout já confirmado — falta só medicamento + nome dos arquivos (itens 1-2
-acima) e o sinal verde do Gabriel pra implementar. Quando vier: `core.py`
+Layout confirmado, regras de preço (padrão + CAMPANHA) confirmadas —
+falta só o nome dos arquivos (item 1 acima) e o sinal verde do Gabriel
+pra implementar. Quando vier: `core.py`
 ganha `sugerir_preco(dias_venc, custo_medio) ->
 preco_sugerido` (a regra da tabela acima) + `exportar_erp_precos(df) ->
 dict[str, str]` — 1 texto por faixa (4 saídas), cada um filtrando os itens
