@@ -58,24 +58,21 @@ com seleção de linha funciona bem desde que (a) a instrução deixe claro
 que é o quadradinho que seleciona, não a linha/célula, e (b) o resultado
 apareça o mais perto possível da tabela, sem exigir rolar a tela.
 
-**Regra de preço própria pra medicamento (14/09/26).** `sugerir_preco()`
-ganhou uma 3ª tabela de fator, só pra categoria (nível 1) **medicamento**
-— PROPAGADO/GENÉRICOS/SIMILARES, mesmo critério de `macro_categoria()`,
-reusado em vez de duplicar a lógica de prefixo:
-
-| Até (dias) | Padrão | **Medicamento** | CAMPANHA |
-|---|---|---|---|
-| 30 | 0,75 | **0,90** | 1,30 |
-| 60 | 0,85 | **1,00** | 1,40 |
-| 90 | 1,00 | **1,05** | 1,50 |
-| 120 | 1,15 | **1,10** | 1,60 |
-
-Ordem de checagem em `sugerir_preco()`: CAMPANHA (nível 1 exato) → depois
-medicamento → senão padrão. Validado com dados reais (1644 lotes
-medicamento, fatores batendo 100%) — inclusive confirmado que um item de
-"CONVENIÊNCIA > REFRIGERANTES E SIMILARES" (a palavra "similares"
-aparece no nível 2, não no nível 1) corretamente cai na regra padrão, não
-na de medicamento — só o nível 1 conta.
+**Regra de preço própria pra medicamento — implementada e REVERTIDA no
+mesmo dia (14/09/26).** `sugerir_preco()` ganhou uma 3ª tabela de fator,
+só pra categoria (nível 1) **medicamento** (PROPAGADO/GENÉRICOS/
+SIMILARES, mesmo critério de `macro_categoria()`): 30d 0,90 / 60d 1,00 /
+90d 1,05 / 120d 1,10 — validada com 1644 lotes reais, fatores batendo
+100%. **Gabriel simulou os 4 arquivos e achou vários itens altos demais**
+— a regra nova desconta MENOS que a padrão nas faixas de 30/60/90 dias
+(só ficava mais barata que a padrão aos 120 dias). Pediu pra voltar à
+regra padrão pra medicamento — revertido, `sugerir_preco()` tem só 2
+casos de novo (CAMPANHA vs. padrão, medicamento sem tratamento
+especial). Os números ficam comentados em `core.py` (não apagados) pra
+retomar rápido se o Gabriel quiser tentar de novo com desconto maior.
+**Lição:** simular antes de fechar uma regra de preço — o número "parece
+razoável" na conversa pode não bater com o padrão anterior linha a
+linha; comparar contra a regra vigente, não só contra a intuição.
 
 Sem nenhuma outra pendência de código aberta.
 
