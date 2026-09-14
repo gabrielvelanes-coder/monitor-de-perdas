@@ -58,6 +58,25 @@ com seleção de linha funciona bem desde que (a) a instrução deixe claro
 que é o quadradinho que seleciona, não a linha/célula, e (b) o resultado
 apareça o mais perto possível da tabela, sem exigir rolar a tela.
 
+**Regra de preço própria pra medicamento (14/09/26).** `sugerir_preco()`
+ganhou uma 3ª tabela de fator, só pra categoria (nível 1) **medicamento**
+— PROPAGADO/GENÉRICOS/SIMILARES, mesmo critério de `macro_categoria()`,
+reusado em vez de duplicar a lógica de prefixo:
+
+| Até (dias) | Padrão | **Medicamento** | CAMPANHA |
+|---|---|---|---|
+| 30 | 0,75 | **0,90** | 1,30 |
+| 60 | 0,85 | **1,00** | 1,40 |
+| 90 | 1,00 | **1,05** | 1,50 |
+| 120 | 1,15 | **1,10** | 1,60 |
+
+Ordem de checagem em `sugerir_preco()`: CAMPANHA (nível 1 exato) → depois
+medicamento → senão padrão. Validado com dados reais (1644 lotes
+medicamento, fatores batendo 100%) — inclusive confirmado que um item de
+"CONVENIÊNCIA > REFRIGERANTES E SIMILARES" (a palavra "similares"
+aparece no nível 2, não no nível 1) corretamente cai na regra padrão, não
+na de medicamento — só o nível 1 conta.
+
 Sem nenhuma outra pendência de código aberta.
 
 ---
@@ -393,7 +412,10 @@ custo nas 2 primeiras faixas) — prioriza girar o estoque a deixar vencer
 desconto):** Gabriel: "mesma formação de preço para todas as categorias.
 com exceção para CAMPANHA." Isso também **fecha a dúvida do medicamento**
 — não tem tratamento especial, é preço padrão igual às outras categorias
-(só CAMPANHA foge da regra).
+(só CAMPANHA foge da regra). **Atualização (14/09/26, mais tarde): não
+vale mais** —
+Gabriel pediu uma 3ª regra só pra medicamento, ver "RETOMAR DAQUI" no
+topo do arquivo. Fica como registro histórico da decisão original.
 
 | Até (dias) | Preço sugerido (CAMPANHA) |
 |---|---|
