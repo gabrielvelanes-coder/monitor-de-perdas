@@ -80,6 +80,22 @@ def _fmtcol(df, col, fmt=BRLc):
     return fcol
 
 
+def _fmtcol_pct(df, col, fmt=BRLc):
+    """Como `_fmtcol`, mas acrescenta o % que cada linha representa da soma
+    da própria coluna NESTE df (a soma do gráfico onde ele é usado, não do
+    recorte inteiro) — "R$ 128.517 (27%)". Usado nos gráficos onde faz
+    sentido comparar as barras entre si (ex. Curva de quantidade, Tempo da
+    última venda), não em todo `_fmtcol` do app pra não mudar gráfico que
+    ninguém pediu pra mudar."""
+    fcol = f"{col}_fmt"
+    total = df[col].sum()
+    if total:
+        df[fcol] = df[col].map(lambda v: f"{fmt(v)} ({PTNUM(v / total * 100, 1)}%)")
+    else:
+        df[fcol] = df[col].map(fmt)
+    return fcol
+
+
 def _cor_taxa(taxa: float, meta: float) -> str:
     """Semáforo de uma taxa contra a meta (mesma régua de frase_diagnostico)."""
     if pd.isna(taxa):
@@ -953,8 +969,8 @@ def tela_anatomia():
             vc["giro_grupo"] = vc["curva_qtd"].map(_grupo_giro)
             g = (vc.groupby("giro_grupo", as_index=False)
                  .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum")))
-            _fmtcol(g, "valor_total", NUM)
-            _fmtcol(g, "itens", NUM)
+            _fmtcol_pct(g, "valor_total", NUM)
+            _fmtcol_pct(g, "itens", NUM)
             sel_cv = alt.selection_point(fields=["giro_grupo"], name="pcg")
             base_cv = alt.Chart(g).encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
@@ -970,8 +986,8 @@ def tela_anatomia():
             vc["tempo_grupo"] = pd.to_numeric(vc["ult_venda_dias"], errors="coerce").map(_grupo_tempo)
             fg = (vc.groupby("tempo_grupo", as_index=False)
                   .agg(valor_total=("valor_total", "sum"), itens=("itens", "sum")))
-            _fmtcol(fg, "valor_total", NUM)
-            _fmtcol(fg, "itens", NUM)
+            _fmtcol_pct(fg, "valor_total", NUM)
+            _fmtcol_pct(fg, "itens", NUM)
             sel_g = alt.selection_point(fields=["tempo_grupo"], name="pgiro")
             base_g = alt.Chart(fg).encode(
                 x=alt.X(f"{mcol}:Q", title=mtitle),
