@@ -1028,6 +1028,14 @@ def tela_anatomia():
             agg["status_cadastro"] = ("status_cadastro", "first")
         tab_full = (d.groupby(["produto", "motivo_label"], as_index=False).agg(**agg)
                     .sort_values("valor", ascending=False).reset_index(drop=True))
+        # base de perdas não tem EAN (só o cadastro de itens a vencer tem) —
+        # busca aqui é só por nome.
+        busca = st.text_input("Buscar produto", key="anat_busca", placeholder="nome do produto")
+        if busca.strip():
+            tab_full = tab_full[
+                tab_full["produto"].astype(str).str.casefold().str.contains(
+                    busca.strip().casefold(), na=False)]
+            st.caption(f"{len(tab_full)} produto(s) encontrado(s).")
         tab = tab_full.head(500).copy()
         tab["valor"] = tab["valor"].map(BRLc)
         tab["itens"] = tab["itens"].map(NUM)
@@ -1347,15 +1355,23 @@ def tela_itens_a_vencer():
 
     with st.container(border=True):
         st.markdown("**Itens**")
+        c_faixa_f, c_busca_f = st.columns([2, 1])
         rot_faixa = {f: f"{f} dias" for f in core.FAIXAS_PRECO}
-        faixa_sel = st.multiselect(
+        faixa_sel = c_faixa_f.multiselect(
             "Faixa de preço (só filtra esta tabela — cards e downloads acima continuam "
             "no recorte de Regional/Lojas/Urgência)",
             core.FAIXAS_PRECO, default=[], key="av_faixa_preco_tabela",
             format_func=lambda f: rot_faixa[f], placeholder="todas as faixas")
+        busca = c_busca_f.text_input(
+            "Buscar (produto ou EAN)", key="av_busca", placeholder="nome ou código de barras")
         enr_tab = enr[enr["faixa_preco"].isin(faixa_sel)] if faixa_sel else enr
+        if busca.strip():
+            alvo = busca.strip().casefold()
+            enr_tab = enr_tab[
+                enr_tab["produto"].astype(str).str.casefold().str.contains(alvo, na=False)
+                | enr_tab["cod_barras"].astype(str).str.contains(alvo, na=False)]
         if enr_tab.empty:
-            st.info("Sem itens nessa faixa.", icon=":material/info:")
+            st.info("Sem itens nesse filtro.", icon=":material/info:")
         else:
             tot_valor_tab = enr_tab["valor_exposto"].sum()
             tot_estoque_tab = enr_tab["estoque_pos"].sum()
@@ -1368,7 +1384,8 @@ def tela_itens_a_vencer():
                 cols.insert(cols.index("estoque_atual") if "estoque_atual" in cols else len(cols),
                             "valor_exposto")
                 cols.insert(cols.index("urgencia") + 1 if "urgencia" in cols else len(cols),
-                            "preco_sugerido")
+                            "custo_medio")
+                cols.insert(cols.index("custo_medio") + 1, "preco_sugerido")
             tab = (enr_tab[cols].sort_values(
                 "valor_exposto" if tem_valor else "estoque_pos", ascending=False)
                 .head(500).reset_index(drop=True))
@@ -1377,14 +1394,15 @@ def tela_itens_a_vencer():
                     tab[c] = tab[c].map(NUM)
             if "valor_exposto" in tab.columns:
                 tab["valor_exposto"] = tab["valor_exposto"].map(BRLc)
-            if "preco_sugerido" in tab.columns:
-                tab["preco_sugerido"] = tab["preco_sugerido"].map(
-                    lambda v: "R$ " + PTNUM(v, 2) if pd.notna(v) else "—")
+            for c in ("custo_medio", "preco_sugerido"):
+                if c in tab.columns:
+                    tab[c] = tab[c].map(lambda v: "R$ " + PTNUM(v, 2) if pd.notna(v) else "—")
             cfg = {"loja": "Loja", "produto": "Produto", "lote": "Lote",
                    "saldo": "Saldo (pré-vencido)", "estoque_atual": "Estoque atual (geral)",
                    "dias_venc": "Dias p/ vencer",
                    "data_validade": st.column_config.DateColumn("Validade", format="DD/MM/YYYY"),
-                   "urgencia": "Urgência", "preco_sugerido": "Preço sugerido",
+                   "urgencia": "Urgência", "custo_medio": "Custo médio",
+                   "preco_sugerido": "Preço sugerido",
                    "curva_qtd": "Curva", "macro": "Categoria",
                    "valor_exposto": "R$ exposto"}
             st.dataframe(tab, hide_index=True, width="stretch", height=380, column_config=cfg)
