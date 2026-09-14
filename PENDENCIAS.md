@@ -26,7 +26,17 @@ Urgência é 30/90/180/365 pra visão geral) pra ver só os itens de 1 faixa
 específica; e **"Digitar faturamento" oculto** da sidebar (Gabriel
 perguntou pra que servia — nunca era realmente usado, `faturamento.csv`
 sempre tem prioridade quando existe; `MOSTRAR_DIGITAR_FATURAMENTO = False`
-no topo do `app.py`, mesmo tratamento de "Fontes de dados").
+no topo do `app.py`, mesmo tratamento de "Fontes de dados"). Filtro de
+faixa de preço **movido** (Gabriel não gostou dele junto de Regional/
+Lojas/Urgência — mexia em cards/gráficos/downloads também) pra dentro do
+container da tabela "Itens", filtrando só ela. Mais 2 ajustes na mesma
+tabela: coluna **"Custo médio"** antes de "Preço sugerido" (pra conferir
+o desconto aplicado) e busca **"Buscar (produto ou EAN)"**. Tabela
+"Produtos" da **Anatomia** ganhou busca por nome também (só nome — a
+base de perdas não tem EAN). Cabeçalho "Monitor de Perdas" movido pra
+cima do menu de navegação, via `st.logo(assets/logo.svg)` — jeito
+suportado pelo Streamlit de "furar a fila" do `st.navigation`, que
+sempre reserva o topo da sidebar pro menu.
 
 Sem nenhuma outra pendência de código aberta.
 
