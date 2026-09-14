@@ -10,17 +10,16 @@ código mais recente. Frentes em aberto pra continuar:
    testado com uma loja específica sem filtro de mês, jan–ago aparecem
    normais, só set/26 cai no aviso "Meses sem faturamento informado" —
    esperado, faturamento.csv não tem setembro ainda.
-2. **Regra de preço do pré-vencido — PLANEJAMENTO FECHADO (14/09/26),
-   esperando o Gabriel dar sinal verde pra implementar.** Nenhuma
-   pergunta em aberto: 4 arquivos por faixa de dias (30/60/90/120,
-   layout `A|EAN|||PREÇO`), nomes `oferta_30dias.txt` /
-   `oferta_60dias.txt` / `oferta_90dias.txt` / `oferta_120dias.txt`,
-   preço padrão custo×0,75/0,85/1,00/1,15 (exceto categoria CAMPANHA,
-   que é markup crescente 1,30/1,40/1,50/1,60), sem exceção pra
-   medicamento, acima de 120 dias fica fora de qualquer arquivo. Detalhe
-   completo na seção [PLANEJAMENTO](#planejamento--regra-de-precificação-do-pré-vencido-2026-09-12)
-   logo abaixo. **Gabriel foi explícito que quer só planejar até aqui —
-   não implementar sem ele confirmar.**
+
+**Preço sugerido do pré-vencido — IMPLEMENTADO (14/09/26).** Gabriel deu
+o sinal verde depois do planejamento fechar (ver
+[PLANEJAMENTO](#planejamento--regra-de-precificação-do-pré-vencido-2026-09-12)
+logo abaixo pro histórico da decisão). `core.py` ganhou `faixa_preco`,
+`sugerir_preco`, `enriquecer_precos`, `exportar_erp_precos`; tela **Itens
+a vencer** ganhou seção "Preço sugerido — pré-vencido" com 4 botões de
+download (`oferta_30dias.txt`/`60`/`90`/`120dias.txt`, layout
+`A|EAN|||PREÇO`) + coluna "Preço sugerido" na tabela. Validado com dados
+reais (4249 lotes, 188 CAMPANHA) e `streamlit.testing` (0 exceções).
 
 Sem nenhuma outra pendência de código aberta.
 
@@ -326,13 +325,17 @@ com mais valor exposto: **13** (diferente do ranking histórico de vencido,
 onde 20 lidera) — vale olhar se é fruto de uma compra/transferência recente
 que ainda dá tempo de agir.
 
-## PLANEJAMENTO — regra de precificação do pré-vencido (2026-09-12)
+## PLANEJAMENTO — regra de precificação do pré-vencido (2026-09-12, implementada 2026-09-14)
 
-Gabriel quer evoluir a tela **Itens a vencer**: já que o saldo pré-vencido de
+> Fica como registro histórico da decisão — já **implementado**
+> (`core.faixa_preco`/`sugerir_preco`/`enriquecer_precos`/
+> `exportar_erp_precos`, tela Itens a vencer), ver "RETOMAR DAQUI" no
+> topo do arquivo pro estado atual.
+
+Gabriel quis evoluir a tela **Itens a vencer**: já que o saldo pré-vencido de
 cada loja está mapeado (`custo_medio` já vem no `enriquecer_a_vencer`), a
 ideia é a ferramenta já **sugerir o preço com desconto** por item, em vez de
-só mostrar o valor exposto. Pediu **só planejar por enquanto — não
-implementar ainda**.
+só mostrar o valor exposto.
 
 **Regra de desconto (definida pelo Gabriel, por dias até vencer —
 corrigida em 14/09/26, valores de 60 e 120 dias mudaram):**
