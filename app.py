@@ -1241,6 +1241,7 @@ def tela_itens_a_vencer():
         st.caption(":material/warning: Relatório sem coluna **Saldo** — usando "
                    "**Estoque atual** (estoque geral, não restrito ao lote "
                    "pré-vencido) como aproximação.")
+    enr = core.enriquecer_precos(enr)
 
     c_reg, c_loja, c_urg = st.columns(3)
     regsel = _regional_local(enr, "av_regional", c_reg)
@@ -1311,6 +1312,32 @@ def tela_itens_a_vencer():
             st.altair_chart(ch, width="stretch")
 
     with st.container(border=True):
+        st.markdown("**Preço sugerido — pré-vencido**")
+        if not tem_valor:
+            st.caption(":material/info: Sem custo médio (cadastro DADOS não carregado) "
+                       "— não dá para sugerir preço nem gerar os arquivos.")
+        else:
+            st.caption("Desconto por faixa de dias até vencer (30/60/90/120) sobre o "
+                       "custo médio, pra girar o estoque antes de vencer — categoria "
+                       "**CAMPANHA** foge da regra e usa markup crescente em vez de "
+                       "desconto. Respeita o recorte de loja/urgência/regional acima; "
+                       "acima de 120 dias fica no preço normal, sem arquivo.")
+            saidas = core.exportar_erp_precos(enr)
+            for col, faixa in zip(st.columns(4), core.FAIXAS_PRECO):
+                nome_arq = core.NOME_ARQUIVO_PRECO[faixa]
+                texto = saidas.get(nome_arq, "")
+                n_eans = len(texto.splitlines()) if texto else 0
+                with col:
+                    st.metric(f"{faixa} dias", f"{NUM(n_eans)} EAN(s)", border=True)
+                    st.download_button(
+                        "Baixar", texto.encode("utf-8"), nome_arq, "text/plain",
+                        icon=":material/download:", disabled=not texto,
+                        key=f"dl_preco_{faixa}", width="stretch")
+            if not saidas:
+                st.caption("Nenhum item pré-vencido com custo válido dentro das 4 "
+                           "faixas neste recorte.")
+
+    with st.container(border=True):
         st.markdown(f"**Itens** — {NUM(len(enr))} lotes · "
                     f"{BRLc(tot_valor) if tem_valor else NUM(tot_estoque) + ' unidades'}")
         cols = ["loja", "produto", "lote", "saldo", "estoque_atual", "dias_venc",
@@ -1319,6 +1346,8 @@ def tela_itens_a_vencer():
         if tem_valor:
             cols.insert(cols.index("estoque_atual") if "estoque_atual" in cols else len(cols),
                         "valor_exposto")
+            cols.insert(cols.index("urgencia") + 1 if "urgencia" in cols else len(cols),
+                        "preco_sugerido")
         tab = (enr[cols].sort_values(
             "valor_exposto" if tem_valor else "estoque_pos", ascending=False)
             .head(500).reset_index(drop=True))
@@ -1327,11 +1356,15 @@ def tela_itens_a_vencer():
                 tab[c] = tab[c].map(NUM)
         if "valor_exposto" in tab.columns:
             tab["valor_exposto"] = tab["valor_exposto"].map(BRLc)
+        if "preco_sugerido" in tab.columns:
+            tab["preco_sugerido"] = tab["preco_sugerido"].map(
+                lambda v: "R$ " + PTNUM(v, 2) if pd.notna(v) else "—")
         cfg = {"loja": "Loja", "produto": "Produto", "lote": "Lote",
                "saldo": "Saldo (pré-vencido)", "estoque_atual": "Estoque atual (geral)",
                "dias_venc": "Dias p/ vencer",
                "data_validade": st.column_config.DateColumn("Validade", format="DD/MM/YYYY"),
-               "urgencia": "Urgência", "curva_qtd": "Curva", "macro": "Categoria",
+               "urgencia": "Urgência", "preco_sugerido": "Preço sugerido",
+               "curva_qtd": "Curva", "macro": "Categoria",
                "valor_exposto": "R$ exposto"}
         st.dataframe(tab, hide_index=True, width="stretch", height=380, column_config=cfg)
         if len(enr) > 500:

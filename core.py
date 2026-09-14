@@ -746,6 +746,114 @@ def macro_categoria(classif) -> str:
     return "nao-medicamento"
 
 
+# ----------------------------------------------------------------------------- #
+# 6.1 preço sugerido do pré-vencido (planejamento fechado com o Gabriel em
+#     14/09/26 — ver PENDENCIAS.md, seção PLANEJAMENTO, pro histórico da decisão)
+# ----------------------------------------------------------------------------- #
+
+# faixas de dias até vencer usadas SÓ pra precificação — diferentes das
+# faixas de urgência da tela (ORDEM_URGENCIA/_faixa_urgencia, acima), que
+# são pra agrupar/visualizar, não pra decidir preço.
+FAIXAS_PRECO = [30, 60, 90, 120]
+
+# fator sobre o custo médio, por faixa — regra padrão desconta (prioriza
+# girar o estoque a deixar vencer); CAMPANHA é a única exceção, com markup
+# CRESCENTE conforme aproxima do vencimento (confirmado pelo Gabriel —
+# provável subsídio por verba de campanha, não é objetivo do painel
+# questionar a lógica de negócio, só aplicar certo).
+_FATOR_PRECO_PADRAO = {30: 0.75, 60: 0.85, 90: 1.00, 120: 1.15}
+_FATOR_PRECO_CAMPANHA = {30: 1.30, 60: 1.40, 90: 1.50, 120: 1.60}
+
+# nome do arquivo de importação do ERP, por faixa — confirmado pelo Gabriel
+NOME_ARQUIVO_PRECO = {30: "oferta_30dias.txt", 60: "oferta_60dias.txt",
+                       90: "oferta_90dias.txt", 120: "oferta_120dias.txt"}
+
+
+def faixa_preco(dias_venc) -> int | None:
+    """Dias até vencer -> faixa de preço (30/60/90/120), ou None quando não
+    entra em nenhum caderno (sem dado, negativo, ou acima de 120 dias —
+    fica no preço normal da loja, sem arquivo)."""
+    if pd.isna(dias_venc) or dias_venc < 0:
+        return None
+    for lim in FAIXAS_PRECO:
+        if dias_venc <= lim:
+            return lim
+    return None
+
+
+def sugerir_preco(dias_venc, custo_medio, classif=None) -> float | None:
+    """Preço sugerido do pré-vencido pra 1 item — None quando falta custo
+    médio ou a faixa não existe (ver `faixa_preco`). Categoria CAMPANHA
+    (nível 1 de `classif`) usa a tabela de markup; as demais, a padrão."""
+    if pd.isna(custo_medio) or custo_medio is None:
+        return None
+    faixa = faixa_preco(dias_venc)
+    if faixa is None:
+        return None
+    n1, _ = _arvore_niveis(classif)
+    fatores = _FATOR_PRECO_CAMPANHA if n1 == "CAMPANHA" else _FATOR_PRECO_PADRAO
+    return round(float(custo_medio) * fatores[faixa], 4)
+
+
+def enriquecer_precos(enr: pd.DataFrame) -> pd.DataFrame:
+    """Acrescenta `faixa_preco`/`preco_sugerido` ao df de itens a vencer já
+    enriquecido — usado pela tela (coluna na tabela) e por
+    `exportar_erp_precos` (mesmo cálculo, sem duplicar)."""
+    m = enr.copy()
+    if "classif" not in m.columns:
+        m["classif"] = None
+    m["faixa_preco"] = m["dias_venc"].map(faixa_preco)
+    m["preco_sugerido"] = m.apply(
+        lambda row: sugerir_preco(row["dias_venc"], row["custo_medio"], row["classif"]), axis=1)
+    return m
+
+
+def _ean_str(v) -> str:
+    """Código de barras vem como int/float dependendo do arquivo — normaliza
+    pra string de dígitos, sem casas decimais nem notação científica."""
+    if pd.isna(v):
+        return ""
+    try:
+        return str(int(float(v)))
+    except (TypeError, ValueError):
+        return str(v).strip()
+
+
+def exportar_erp_precos(enr: pd.DataFrame) -> dict[str, str]:
+    """A partir do df de itens a vencer já enriquecido (`enriquecer_a_vencer`
+    — precisa de dias_venc/custo_medio/cod_barras; classif é opcional, sem
+    ela cai sempre na regra padrão), gera o texto dos arquivos de
+    importação do ERP no layout `A|EAN|||PREÇO` (4 casas decimais),
+    1 arquivo por faixa de dias.
+
+    O mesmo EAN pode aparecer em mais de 1 arquivo (lotes em faixas
+    diferentes) — é esperado, o ERP escolhe o preço certo pelo lote real
+    selecionado na venda (ver PENDENCIAS.md). Dentro de uma mesma faixa,
+    2 lotes do mesmo EAN geram o mesmo preço (mesma fórmula), então só 1
+    linha por EAN.
+
+    -> {nome_do_arquivo: texto}, só com as faixas que tiverem algum item.
+    """
+    faltando = {"dias_venc", "custo_medio", "cod_barras"} - set(enr.columns)
+    if faltando:
+        raise ValueError(f"Faltam colunas pra gerar o arquivo do ERP: {faltando}")
+
+    m = enriquecer_precos(enr)
+    m["ean"] = m["cod_barras"].map(_ean_str)
+    m = m[(m["ean"] != "") & m["faixa_preco"].notna() & m["preco_sugerido"].notna()]
+
+    saidas = {}
+    for faixa in FAIXAS_PRECO:
+        sub = m[m["faixa_preco"] == faixa]
+        if sub.empty:
+            continue
+        por_ean = sub.groupby("ean", as_index=False)["preco_sugerido"].first()
+        linhas = [f"A|{ean}|||{preco:.4f}" for ean, preco in
+                  zip(por_ean["ean"], por_ean["preco_sugerido"])]
+        saidas[NOME_ARQUIVO_PRECO[faixa]] = "\n".join(linhas)
+    return saidas
+
+
 # baldes de diagnóstico: onde a perda foi decidida
 BALDES = {
     "pdv":          ("Evitável no PDV (item que gira venceu na gôndola)",
