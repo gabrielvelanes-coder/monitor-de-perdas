@@ -20,6 +20,13 @@ a vencer** ganhou seção "Preço sugerido — pré-vencido" com 4 botões de
 download (`oferta_30dias.txt`/`60`/`90`/`120dias.txt`, layout
 `A|EAN|||PREÇO`) + coluna "Preço sugerido" na tabela. Validado com dados
 reais (4249 lotes, 188 CAMPANHA) e `streamlit.testing` (0 exceções).
+Depois, mais 2 ajustes na mesma tela: **filtro "Faixa de preço"**
+(30/60/90/120, multiselect ao lado de Urgência — diferente granularidade,
+Urgência é 30/90/180/365 pra visão geral) pra ver só os itens de 1 faixa
+específica; e **"Digitar faturamento" oculto** da sidebar (Gabriel
+perguntou pra que servia — nunca era realmente usado, `faturamento.csv`
+sempre tem prioridade quando existe; `MOSTRAR_DIGITAR_FATURAMENTO = False`
+no topo do `app.py`, mesmo tratamento de "Fontes de dados").
 
 Sem nenhuma outra pendência de código aberta.
 
