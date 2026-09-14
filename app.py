@@ -44,6 +44,10 @@ META_PADRAO = 0.004  # 0,40% do faturamento
 MOSTRAR_FONTES_DADOS = False  # uploaders manuais na sidebar — ocultos a pedido
 # (2026-09-12): o fluxo real é sempre soltar o arquivo na pasta (auto-detect);
 # vira True de novo se precisar testar um relatório pontual sem renomear/mover.
+MOSTRAR_DIGITAR_FATURAMENTO = False  # editor manual de faturamento — oculto a
+# pedido (2026-09-14): faturamento.csv sempre tem prioridade quando existe (ver
+# build_context), então o editor nunca era realmente usado, só ruído na
+# sidebar. Vira True de novo se um dia faltar o faturamento.csv como plano B.
 
 
 def BRLc(v) -> str:
@@ -212,8 +216,9 @@ def build_context() -> dict:
     meta = META_PADRAO
     incluir_dep = False
 
-    with st.sidebar.expander("Digitar faturamento", icon=":material/edit:"):
-        _editor_faturamento(perdas, fat)
+    if MOSTRAR_DIGITAR_FATURAMENTO:
+        with st.sidebar.expander("Digitar faturamento", icon=":material/edit:"):
+            _editor_faturamento(perdas, fat)
 
     # aplica o recorte global no que as telas consomem
     perdas_f, fat_f = perdas, fat
