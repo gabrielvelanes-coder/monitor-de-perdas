@@ -1053,18 +1053,44 @@ def tela_anatomia():
         tab["itens"] = tab["itens"].map(NUM)
         tab["dias_sem_vender"] = tab["dias_sem_vender"].map(NUM)
         tab["n_lojas"] = tab["n_lojas"].map(NUM)
-        st.dataframe(tab, hide_index=True, width="stretch", height=360,
-                     column_config={
-                         "produto": "Produto",
-                         "motivo_label": "Motivo",
-                         "valor": "Total perda (R$)",
-                         "itens": "Unidades",
-                         "curva_qtd": "Curva",
-                         "cat": "Árvore nível 1",
-                         "tempo_grupo": "Tempo da última venda",
-                         "dias_sem_vender": "Dias s/ vender",
-                         "n_lojas": "Nº lojas",
-                         "lojas_ids": "Lojas (ID)"})
+        st.caption(":material/ads_click: Clique no quadradinho à esquerda de uma linha "
+                   "pra ver o mês e a loja desse produto logo abaixo.")
+        ev_prod = st.dataframe(
+            tab, hide_index=True, width="stretch", height=360,
+            on_select="rerun", selection_mode="single-row", key="anat_tabela_produtos",
+            column_config={
+                "produto": "Produto",
+                "motivo_label": "Motivo",
+                "valor": "Total perda (R$)",
+                "itens": "Unidades",
+                "curva_qtd": "Curva",
+                "cat": "Árvore nível 1",
+                "tempo_grupo": "Tempo da última venda",
+                "dias_sem_vender": "Dias s/ vender",
+                "n_lojas": "Nº lojas",
+                "lojas_ids": "Lojas (ID)"})
+
+        # Painel logo abaixo da tabela (antes do resto) pra ficar óbvio que é
+        # resultado do clique — 1ª tentativa (commit 1fdaf48) devia funcionar
+        # igual, mas Gabriel clicou e "não apareceu nada"; ficava depois do
+        # "Baixar (CSV)", suspeita de ter passado batido rolando a tela.
+        linhas_sel = ev_prod.selection.rows if ev_prod.selection else []
+        if linhas_sel:
+            linha = tab_full.iloc[linhas_sel[0]]
+            produto_sel, motivo_sel = linha["produto"], linha["motivo_label"]
+            det = d[(d["produto"] == produto_sel) & (d["motivo_label"] == motivo_sel)]
+            g_det = (det.groupby(["ano_mes", "loja"], as_index=False)
+                     .agg(valor=("valor_total", "sum"), itens=("itens", "sum"))
+                     .sort_values(["ano_mes", "valor"], ascending=[True, False]))
+            g_det["loja"] = g_det["loja"].astype("Int64").astype(str)
+            g_det["valor"] = g_det["valor"].map(BRLc)
+            g_det["itens"] = g_det["itens"].map(NUM)
+            with st.container(border=True):
+                st.markdown(f"**{produto_sel}** — {motivo_sel}: por mês e loja")
+                st.dataframe(g_det, hide_index=True, width="stretch", height=260,
+                             column_config={"ano_mes": "Mês", "loja": "Loja",
+                                            "valor": "Total perda (R$)", "itens": "Unidades"})
+
         if len(tab_full) > 500:
             st.caption(f"Mostrando as 500 maiores de {len(tab_full)} linhas — "
                        "o CSV traz todas.")
@@ -1072,29 +1098,6 @@ def tela_anatomia():
         st.download_button("Baixar (CSV)", tab_full.to_csv(index=False).encode("utf-8-sig"),
                            f"anatomia_{slug}.csv", "text/csv",
                            icon=":material/download:", key="anat_dl")
-
-        # Clique-na-linha do st.dataframe (grid em canvas) não é confiável —
-        # Gabriel testou e não funcionou. Seletor normal (dropdown) no lugar:
-        # mesmo resultado (ver mês/loja de 1 produto), sem depender de clique
-        # em checkbox minúsculo dentro de um canvas.
-        produtos_disp = sorted(tab_full["produto"].unique())
-        produto_sel = st.selectbox(
-            "Ver mês e loja de um produto", produtos_disp,
-            index=None, placeholder="selecione um produto…", key="anat_produto_detalhe")
-        if produto_sel:
-            det = d[d["produto"] == produto_sel]
-            g_det = (det.groupby(["ano_mes", "loja", "motivo_label"], as_index=False)
-                     .agg(valor=("valor_total", "sum"), itens=("itens", "sum"))
-                     .sort_values(["ano_mes", "valor"], ascending=[True, False]))
-            g_det["loja"] = g_det["loja"].astype("Int64").astype(str)
-            g_det["valor"] = g_det["valor"].map(BRLc)
-            g_det["itens"] = g_det["itens"].map(NUM)
-            with st.container(border=True):
-                st.markdown(f"**{produto_sel}** — por mês e loja")
-                st.dataframe(g_det, hide_index=True, width="stretch", height=260,
-                             column_config={"ano_mes": "Mês", "loja": "Loja",
-                                            "motivo_label": "Motivo",
-                                            "valor": "Total perda (R$)", "itens": "Unidades"})
 
 
 # =========================================================================== #
