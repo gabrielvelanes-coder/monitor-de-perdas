@@ -36,7 +36,12 @@ o desconto aplicado) e busca **"Buscar (produto ou EAN)"**. Tabela
 base de perdas não tem EAN). Cabeçalho "Monitor de Perdas" movido pra
 cima do menu de navegação, via `st.logo(assets/logo.svg)` — jeito
 suportado pelo Streamlit de "furar a fila" do `st.navigation`, que
-sempre reserva o topo da sidebar pro menu.
+sempre reserva o topo da sidebar pro menu. Gráficos **"Curva de
+quantidade"** e **"Tempo da última venda"** (Anatomia) ganharam o % de
+cada barra sobre o total do próprio gráfico, junto do R$/unidades —
+`_fmtcol_pct()` novo (não mexe em `_fmtcol`, usado em vários outros
+gráficos do app). Tudo verificado ao vivo no Chrome, não só por teste
+automatizado.
 
 Sem nenhuma outra pendência de código aberta.
 
