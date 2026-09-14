@@ -12,22 +12,25 @@ código mais recente. Frentes em aberto pra continuar:
    esperado, faturamento.csv não tem setembro ainda.
 2. **Regra de preço do pré-vencido** — planejamento em andamento (seção
    [PLANEJAMENTO](#planejamento--regra-de-precificação-do-pré-vencido-2026-09-12)
-   logo abaixo), esperando o Gabriel responder:
-   - Quando o **mesmo EAN** tem mais de um lote pré-vencido ao mesmo tempo
-     (prazos diferentes), uso o do **lote mais urgente** pra definir o
-     preço daquele EAN? (palpite meu, aguardando confirmação)
-   - Faixa **121–150 dias** sem preço definido — mantém o markup de 120
-     dias (custo×1,10) até 150?
+   logo abaixo). **Grande avanço em 14/09/26:** os "4 cadernos de
+   oferta" são **1 arquivo por faixa de dias (30/60/90/120)**, não 1
+   arquivo único pra rede toda como se pensava antes — isso **resolve
+   sozinho** a dúvida do desempate por EAN (não precisa escolher "o
+   lote mais urgente": o EAN simplesmente entra no arquivo de cada
+   faixa em que tiver lote válido, repetido entre cadernos é esperado
+   e sem problema — o sistema já resolve pelo dia real do lote
+   selecionado na venda) **e** a dúvida da faixa 121–150 (não existe:
+   confirmado que acima de 120 dias não entra em nenhum caderno, fica
+   no preço normal da loja).
+   Ainda em aberto:
+   - **Layout exato dos 4 arquivos** — o print mais recente mostra
+     `A|EAN|PREÇO` (2 pipes), mas o layout confirmado antes era
+     `A|EAN|||PREÇO` (4 pipes, 2 campos vazios). Pedido ao Gabriel pra
+     colar o texto puro de 1 linha (não print) pra eliminar qualquer
+     dúvida de caractere invisível — **não implementar sem essa
+     confirmação**, formato errado quebra a importação no ERP.
    - Regra vale igual pra **medicamento** (preço-teto CMED/ANVISA)?
-   - Extensão/nome esperado do arquivo de importação do ERP.
-   - **Novo (14/09/26): não é 1 arquivo, são 4** — Gabriel disse "4
-     cadernos de oferta", esclareceu que são **4 arquivos de preço, cada
-     um com o layout do próprio sistema** (não confundir com os 4
-     fabricantes do outro projeto, [[projeto-apuracao-trade]]/
-     painel-ofertas — são conceitos homônimos, mas times diferentes).
-     Ainda não sei o que diferencia os 4 (tipo de registro? propósito?
-     um por faixa de dias?) nem o layout de cada um — pedi pra ele
-     mandar os 4 (print/exemplo, como fez com o `A|EAN|||PREÇO` antes).
+   - Extensão/nome esperado de cada um dos 4 arquivos.
    - **Só depois de fechar tudo isso**: implementar `sugerir_preco()` +
      `exportar_erp_precos()` em `core.py` — Gabriel foi explícito que quer
      só planejar por enquanto, não mexer no código ainda.
@@ -352,82 +355,73 @@ implementar ainda**.
 | 60 | custo × 0,95 (5% de desconto sobre o custo) |
 | 90 | custo × 1,00 (preço de custo) |
 | 120 | custo × 1,10 (10% de markup sobre o custo) |
-| acima de 150 | sem desconto diferenciado — preço normal da loja |
+| acima de 120 | sem caderno — preço normal da loja (confirmado 14/09/26) |
 
 Quanto mais perto de vencer, mais agressivo o desconto (inclusive abaixo do
 custo nas 2 primeiras faixas) — prioriza girar o estoque a deixar vencer
 (perda de 100% do custo).
 
-**Layout do arquivo de importação do ERP** — Gabriel mandou o modelo
-(print). Uma linha por item, campos separados por `|`, sem cabeçalho:
+**(14/09/26) São 4 cadernos = 4 arquivos, 1 por faixa de dias — não 1
+arquivo único pra rede toda como se pensava antes.** Gabriel: "temos que
+ter 4 cadernos de oferta. os preços dos 30 dias, outro para 60, outro para
+90 e outro para 120." Cada caderno é um arquivo separado, com os itens que
+têm lote pré-vencido naquela faixa e o preço daquela faixa.
+
+**Isso resolveu sozinho 2 dúvidas que estavam em aberto:**
+- **Desempate por EAN com múltiplos lotes** — não existe mais o problema.
+  Gabriel: "não tem problema ter itens iguais nos cadernos, porque o preço
+  só sai na loja quando é colocado o lote e fica amarrado os dias de
+  vencimento. o sistema faz a conta em cima de dias a vencer." Ou seja: se
+  o mesmo EAN tem lote na faixa 30 e outro na faixa 60, ele **entra nos 2
+  arquivos**, cada um com o preço da sua faixa — o ERP escolhe o preço
+  certo pelo lote real selecionado na venda, não pelo arquivo. Não preciso
+  mais escolher "o lote mais urgente" nem inventar critério de desempate.
+- **Faixa 121–150 dias** — não existe. Só os 4 cadernos (30/60/90/120)
+  existem; confirmado que acima de 120 dias não entra em nenhum arquivo,
+  fica no preço normal da loja.
+
+**Layout — AINDA NÃO CONFIRMADO, discrepância a resolver antes de
+implementar.** Gabriel mandou um print novo (14/09/26) com linhas assim:
 
 ```
-A|<EAN>|||<PREÇO>
+A|4005900664006|29.2500
+A|4005808850617|29.2500
+A|7500435146258|86.3700
 ```
 
-Exemplo real:
-```
-A|7894913003073|||38.9700
-A|7894913003066|||38.9700
-A|7896023707100|||89.9500
-```
+Isso é só **2 pipes** (`A|EAN|PREÇO`), mas o layout confirmado numa sessão
+anterior (10/09 ou 11/09) tinha **4 pipes** (`A|EAN|||PREÇO`, 2 campos
+vazios no meio — exemplo: `A|7894913003073|||38.9700`). Pedido ao Gabriel
+pra colar o **texto puro** (não print) de uma linha, porque print pode
+comprimir/cortar caractere e isso quebra a importação no ERP se eu chutar
+errado. Até isso vir, **não implementar** `exportar_erp_precos()`.
 
+O que já dá pra fixar independente do layout exato:
 - Campo 1: `A` = **"Preço"** (tipo de registro — confirmado pelo Gabriel).
-- Campo 2: **EAN** (código de barras) — já temos essa coluna no relatório
-  de itens a vencer (`cod_barras` em `core._AVENCER_MAP`), então dá pra
-  cruzar certo.
-- Campos 3 e 4: sempre vazios no exemplo — sem uso aparente, só reproduzir
-  a estrutura `|||`.
-- Campo 5 (**preço**): ponto como decimal, sempre **4 casas** (`38.9700`,
-  não `38.97`), sem separador de milhar.
-
-**Arquivo único pra rede toda (confirmado pelo Gabriel)** — não precisa ser
-por loja. O preço só passa a valer numa venda quando **(a)** a loja tem
-aquele item como pré-vencido em estoque **e (b)** o operador de caixa
-seleciona o **lote** na hora da venda — ou seja, o próprio ERP já garante
-que o desconto só se aplica ao lote pré-vencido de verdade, mesmo o arquivo
-sendo só EAN → preço (sem loja, sem lote).
-
-**Novo ponto em aberto, por causa disso:** o arquivo é por **EAN**, não por
-lote — então se o **mesmo produto** tiver mais de um lote pré-vencido ao
-mesmo tempo (em lojas diferentes, ou até na mesma loja) com prazos bem
-diferentes, só dá pra mandar **um preço só** pra aquele EAN no arquivo. Meu
-palpite: usar sempre o lote **mais urgente** (menos dias até vencer) pra
-definir o preço daquele EAN — é a opção mais conservadora (garante que o
-lote mais crítico saia com o desconto certo; o efeito colateral é que um
-lote menos urgente do mesmo produto, se existir, sairia mais barato do que
-precisaria). Preciso que o Gabriel confirme se é assim mesmo que quer, ou
-se prefere outra regra de desempate (ex. média ponderada pelo saldo).
+- EAN = código de barras, já temos essa coluna no relatório de itens a
+  vencer (`cod_barras` em `core._AVENCER_MAP`).
+- Preço: ponto como decimal, **4 casas** (`38.9700`, não `38.97`), sem
+  separador de milhar — consistente nos 2 prints que ele mandou.
 
 **Em aberto, ainda preciso fechar antes de implementar:**
-1. **Faixa 121–150 dias não tem preço definido** — mantém o markup de 120
-   dias (custo × 1,10) até 150, ou é uma faixa de transição própria? (O
-   Gabriel repetiu a regra 30/60/90/120 sem mencionar o "acima de 150" de
-   novo — ainda não bati o martelo nisso.)
-2. **Extensão/nome esperado do arquivo** (`.txt`? sem extensão?).
+1. **Layout exato dos 4 arquivos** (2 pipes ou 4 pipes) — ver acima,
+   bloqueante.
+2. **Extensão/nome esperado de cada um dos 4 arquivos** (`.txt`? sem
+   extensão? nome que identifique a faixa, tipo `preco_30dias.txt`?).
 3. **Regra é igual pra medicamento e não-medicamento?** Medicamento tem
    preço-teto regulado (CMED/ANVISA — PMC), mas isso não impede desconto
    pra baixo; vale confirmar se não há alguma trava própria da rede antes
    de aplicar desconto abaixo do custo em medicamento.
-4. As faixas de dias da regra (30/60/90/120/150) são **diferentes** das
+4. As faixas de dias da regra (30/60/90/120) são **diferentes** das
    faixas de urgência já usadas na tela (30/90/180/365) — tudo bem terem
    propósitos diferentes (uma é pra agrupar/visualizar, a outra pra
    precificar), só registrando que não são a mesma coisa.
-5. **(14/09/26) São 4 arquivos, não 1.** Até aqui o plano assumia "um
-   arquivo único pra rede toda" (layout `A|EAN|||PREÇO`, confirmado numa
-   sessão anterior). Gabriel corrigiu: são **4 arquivos de preço, cada
-   um no layout do sistema** — não disse ainda o que diferencia os 4
-   (tipo de registro do ERP? uma faixa de dias por arquivo? outra coisa?)
-   nem mandou o layout de cada um. Pedido a ele mandar os 4 (print ou
-   exemplo de arquivo) antes de mexer em `exportar_erp_precos()` — o
-   layout `A|EAN|||PREÇO` documentado abaixo pode ser só 1 dos 4, não
-   necessariamente o padrão de todos.
 
-Quando o Gabriel der sinal verde (e os 4 layouts estiverem claros):
-`core.py` ganha `sugerir_preco(dias_venc, custo_medio) -> preco_sugerido`
-(a regra da tabela acima) + `exportar_erp_precos(df)` — a forma exata
-(1 função por arquivo? 1 função que devolve os 4?) depende do que
-diferencia os 4 layouts, ainda não sei.
+Quando o Gabriel der sinal verde (e o layout dos 4 arquivos estiver
+confirmado): `core.py` ganha `sugerir_preco(dias_venc, custo_medio) ->
+preco_sugerido` (a regra da tabela acima) + `exportar_erp_precos(df) ->
+dict[str, str]` — 1 texto por faixa (4 saídas), cada um filtrando os itens
+daquela faixa e reaproveitando o mesmo formato de linha pras 4.
 
 ## PENDENTE
 
