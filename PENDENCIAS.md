@@ -5,6 +5,15 @@
 Tudo commitado, working tree limpa, app rodando em `localhost:8501` com o
 código mais recente. Frentes em aberto pra continuar:
 
+0. **Confirmar visualmente o clique na tabela "Produtos" (Anatomia)** —
+   implementado (`on_select="rerun"`, `selection_mode="single-row"`,
+   drill-down por mês/loja abaixo da tabela quando clica numa linha),
+   mas **não verificado ao vivo**: nem `streamlit.testing` (a API de
+   teste não simula seleção em `st.dataframe`) nem a automação do Chrome
+   (grid em canvas, clique automatizado não acertou o checkbox em várias
+   tentativas) conseguiram confirmar visualmente. Pedir ao Gabriel pra
+   clicar numa linha e confirmar que aparece o painel de mês/loja.
+
 1. **Faturamento de setembro/2026** — só quando o mês fechar (ver
    [PENDENTE #1](#1-faturamento-de-setembro2026) mais abaixo). Não é bug:
    testado com uma loja específica sem filtro de mês, jan–ago aparecem
