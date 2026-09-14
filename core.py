@@ -757,17 +757,18 @@ def macro_categoria(classif) -> str:
 FAIXAS_PRECO = [30, 60, 90, 120]
 
 # fator sobre o custo médio, por faixa — regra padrão desconta (prioriza
-# girar o estoque a deixar vencer). 2 exceções, por categoria de nível 1:
-# - MEDICAMENTO (PROPAGADO/GENÉRICOS/SIMILARES — mesmo critério de
-#   macro_categoria()) tem desconto mais suave e markup mais baixo que o
-#   padrão (15/09/26).
-# - CAMPANHA tem markup CRESCENTE conforme aproxima do vencimento
-#   (confirmado pelo Gabriel — provável subsídio por verba de campanha,
-#   não é objetivo do painel questionar a lógica de negócio, só aplicar
-#   certo).
+# girar o estoque a deixar vencer). CAMPANHA é a única exceção hoje, com
+# markup CRESCENTE conforme aproxima do vencimento (confirmado pelo
+# Gabriel — provável subsídio por verba de campanha, não é objetivo do
+# painel questionar a lógica de negócio, só aplicar certo).
 _FATOR_PRECO_PADRAO = {30: 0.75, 60: 0.85, 90: 1.00, 120: 1.15}
-_FATOR_PRECO_MEDICAMENTO = {30: 0.90, 60: 1.00, 90: 1.05, 120: 1.10}
 _FATOR_PRECO_CAMPANHA = {30: 1.30, 60: 1.40, 90: 1.50, 120: 1.60}
+# (14/09/26) regra própria de medicamento (0,90/1,00/1,05/1,10) foi
+# implementada e depois REVERTIDA no mesmo dia — Gabriel simulou e achou
+# alguns itens altos demais, pediu pra voltar à regra padrão. Deixa a
+# tabela comentada aqui pra não perder o número se ele quiser retomar
+# com valores ajustados: _FATOR_PRECO_MEDICAMENTO = {30: 0.90, 60: 1.00,
+# 90: 1.05, 120: 1.10} — ver PENDENCIAS.md pro histórico completo.
 
 # nome do arquivo de importação do ERP, por faixa — confirmado pelo Gabriel
 NOME_ARQUIVO_PRECO = {30: "oferta_30dias.txt", 60: "oferta_60dias.txt",
@@ -788,23 +789,16 @@ def faixa_preco(dias_venc) -> int | None:
 
 def sugerir_preco(dias_venc, custo_medio, classif=None) -> float | None:
     """Preço sugerido do pré-vencido pra 1 item — None quando falta custo
-    médio ou a faixa não existe (ver `faixa_preco`). 3 tabelas de fator
-    conforme a categoria (nível 1) de `classif`: CAMPANHA usa markup
-    crescente; medicamento (PROPAGADO/GENÉRICOS/SIMILARES — mesmo critério
-    de `macro_categoria`) usa a tabela própria (desconto mais suave,
-    markup mais baixo); as demais categorias usam a padrão."""
+    médio ou a faixa não existe (ver `faixa_preco`). Categoria CAMPANHA
+    (nível 1 de `classif`) usa a tabela de markup; as demais — incluindo
+    medicamento, sem tratamento especial — usam a padrão."""
     if pd.isna(custo_medio) or custo_medio is None:
         return None
     faixa = faixa_preco(dias_venc)
     if faixa is None:
         return None
     n1, _ = _arvore_niveis(classif)
-    if n1 == "CAMPANHA":
-        fatores = _FATOR_PRECO_CAMPANHA
-    elif macro_categoria(classif) == "medicamento":
-        fatores = _FATOR_PRECO_MEDICAMENTO
-    else:
-        fatores = _FATOR_PRECO_PADRAO
+    fatores = _FATOR_PRECO_CAMPANHA if n1 == "CAMPANHA" else _FATOR_PRECO_PADRAO
     return round(float(custo_medio) * fatores[faixa], 4)
 
 
