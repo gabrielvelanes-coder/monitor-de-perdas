@@ -1,5 +1,18 @@
 # Pendências e histórico — Monitor de Perdas
 
+## Infraestrutura — backup (16/09/26)
+
+Repositório não tinha remoto (só commits locais) — criado
+https://github.com/gabrielvelanes-coder/monitor-de-perdas e enviado todo
+o histórico (`git push -u origin master`). Novo `backup_dados.py`
+(`python backup_dados.py`, roda manual, sem Tarefa Agendada) copia
+`DADOS*.xlsx`/`BASE CADASTRO*.xlsx`/`perdas*.xls`/`faturamento.csv`/
+`itens a vencer.xlsx`/`regionais.csv` (nunca vão pro Git) pra
+`OneDrive\Área de Trabalho\BACKUPS DB\PERDAS\<carimbo>\`, mantém as 5
+rodadas mais recentes. Mesmo processo aplicado no projeto Monitor de
+Preço de Mercado (`OneDrive\Área de Trabalho\MONITOR DE PRECOS\
+monitor-precos`) no mesmo dia.
+
 ## RETOMAR DAQUI (fim da sessão 2026-09-14)
 
 Tudo commitado, working tree limpa, app rodando em `localhost:8501` com o
