@@ -826,7 +826,18 @@ def _ean_str(v) -> str:
         return str(v).strip()
 
 
-def exportar_erp_precos(enr: pd.DataFrame) -> dict[str, str]:
+def _ean_valido(ean: str) -> bool:
+    """A coluna do relatório de itens a vencer se chama 'Cód. Barras/Etiqueta'
+    — mistura o EAN de verdade com o código interno (etiqueta) quando o ERP
+    não tem o EAN cadastrado pro lote. Achado real (17/09/26): isso gerava
+    arquivo de importação do ERP com código de etiqueta em vez de EAN
+    (ex. "38493", "78945456"), e o ERP rejeitava o arquivo inteiro na
+    importação. Formatos de código de barras de verdade têm 8+ dígitos
+    (EAN-8/UPC-A/EAN-13) — abaixo disso é etiqueta interna, não EAN."""
+    return ean.isdigit() and len(ean) >= 8
+
+
+def exportar_erp_precos(enr: pd.DataFrame) -> tuple[dict[str, str], int]:
     """A partir do df de itens a vencer já enriquecido (`enriquecer_a_vencer`
     — precisa de dias_venc/custo_medio/cod_barras; classif é opcional, sem
     ela cai sempre na regra padrão), gera o texto dos arquivos de
@@ -839,7 +850,9 @@ def exportar_erp_precos(enr: pd.DataFrame) -> dict[str, str]:
     2 lotes do mesmo EAN geram o mesmo preço (mesma fórmula), então só 1
     linha por EAN.
 
-    -> {nome_do_arquivo: texto}, só com as faixas que tiverem algum item.
+    -> ({nome_do_arquivo: texto} só com as faixas que tiverem algum item,
+    quantidade de linhas descartadas por código de barras inválido — ver
+    `_ean_valido`).
     """
     faltando = {"dias_venc", "custo_medio", "cod_barras"} - set(enr.columns)
     if faltando:
@@ -848,6 +861,9 @@ def exportar_erp_precos(enr: pd.DataFrame) -> dict[str, str]:
     m = enriquecer_precos(enr)
     m["ean"] = m["cod_barras"].map(_ean_str)
     m = m[(m["ean"] != "") & m["faixa_preco"].notna() & m["preco_sugerido"].notna()]
+
+    n_invalidos = int((~m["ean"].map(_ean_valido)).sum())
+    m = m[m["ean"].map(_ean_valido)]
 
     saidas = {}
     for faixa in FAIXAS_PRECO:
@@ -858,7 +874,7 @@ def exportar_erp_precos(enr: pd.DataFrame) -> dict[str, str]:
         linhas = [f"A|{ean}|||{preco:.4f}" for ean, preco in
                   zip(por_ean["ean"], por_ean["preco_sugerido"])]
         saidas[NOME_ARQUIVO_PRECO[faixa]] = "\n".join(linhas)
-    return saidas
+    return saidas, n_invalidos
 
 
 # baldes de diagnóstico: onde a perda foi decidida

@@ -18,6 +18,7 @@ from __future__ import annotations
 import glob
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 import altair as alt
@@ -213,12 +214,14 @@ def build_context() -> dict:
 
     # itens a vencer (opcional) — estoque atual com lote/validade, por loja
     auto_av = _achar("itens*a*vencer*.xls*", "*a vencer*.xls*", "*validade*.xls*")
-    itens_a_vencer, fonte_av = None, None
+    itens_a_vencer, fonte_av, fonte_av_mtime = None, None, None
     if up_av is not None:
         itens_a_vencer, fonte_av = core.load_itens_a_vencer(up_av), up_av.name
+        fonte_av_mtime = datetime.now()  # upload manual = a atualização é agora
     elif auto_av:
         itens_a_vencer = _a_vencer(auto_av[0], Path(auto_av[0]).stat().st_mtime)
         fonte_av = Path(auto_av[0]).name
+        fonte_av_mtime = datetime.fromtimestamp(Path(auto_av[0]).stat().st_mtime)
 
     # regionais (opcional) — de-para loja -> regional, rotativo, editado à mão
     auto_reg = _achar("regionais.csv", "*regional*.csv")
@@ -272,7 +275,7 @@ def build_context() -> dict:
                 vclass=vclass, n_meses=n_meses_perda, lojas_sel=lojas_sel,
                 meses_sel=meses_sel, psig=psig, csig=csig, catsig=catsig,
                 itens_a_vencer=itens_a_vencer, fonte_av=fonte_av,
-                loja_regional=loja_regional)
+                fonte_av_mtime=fonte_av_mtime, loja_regional=loja_regional)
 
 
 def _editor_faturamento(perdas, fat):
@@ -1282,9 +1285,11 @@ def tela_itens_a_vencer():
             "lote, data de validade e estoque, na barra lateral.",
             icon=":material/hourglass_empty:")
         return
+    atualizado = (CTX["fonte_av_mtime"].strftime("%d/%m/%Y %H:%M")
+                  if CTX["fonte_av_mtime"] else "—")
     st.caption(f"Saldo do pré-vencido (o que ainda resta do lote a vencer), por "
                f"data de validade — para agir antes da perda acontecer · "
-               f"fonte `{CTX['fonte_av']}`")
+               f"fonte `{CTX['fonte_av']}` · atualizado em {atualizado}")
 
     enr = core.enriquecer_a_vencer(av, CTX["cad"])
     if CTX["cad"] is None:
@@ -1375,7 +1380,7 @@ def tela_itens_a_vencer():
                        "**CAMPANHA** foge da regra e usa markup crescente em vez de "
                        "desconto. Respeita o recorte de loja/urgência/regional acima; "
                        "acima de 120 dias fica no preço normal, sem arquivo.")
-            saidas = core.exportar_erp_precos(enr)
+            saidas, n_invalidos = core.exportar_erp_precos(enr)
             for col, faixa in zip(st.columns(4), core.FAIXAS_PRECO):
                 nome_arq = core.NOME_ARQUIVO_PRECO[faixa]
                 texto = saidas.get(nome_arq, "")
@@ -1389,6 +1394,13 @@ def tela_itens_a_vencer():
             if not saidas:
                 st.caption("Nenhum item pré-vencido com custo válido dentro das 4 "
                            "faixas neste recorte.")
+            if n_invalidos:
+                st.caption(f":material/warning: {NUM(n_invalidos)} item(ns) ficaram de "
+                           f"fora dos arquivos — o relatório do ERP trouxe o código "
+                           f"interno (etiqueta) em vez do código de barras pra eles "
+                           f"(coluna 'Cód. Barras/Etiqueta' do ERP mistura os dois). "
+                           f"Corrigir o cadastro do EAN no ERP pra esses itens "
+                           f"entrarem no arquivo.")
 
     with st.container(border=True):
         st.markdown("**Itens**")
