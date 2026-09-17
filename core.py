@@ -789,17 +789,27 @@ def faixa_preco(dias_venc) -> int | None:
 
 def sugerir_preco(dias_venc, custo_medio, classif=None) -> float | None:
     """Preço sugerido do pré-vencido pra 1 item — None quando falta custo
-    médio ou a faixa não existe (ver `faixa_preco`). Categoria CAMPANHA
-    (nível 1 de `classif`) usa a tabela de markup; as demais — incluindo
-    medicamento, sem tratamento especial — usam a padrão."""
-    if pd.isna(custo_medio) or custo_medio is None:
+    médio, o custo está zerado, ou a faixa não existe (ver `faixa_preco`).
+    Categoria CAMPANHA (nível 1 de `classif`) usa a tabela de markup; as
+    demais — incluindo medicamento, sem tratamento especial — usam a
+    padrão.
+
+    Achado real (17/09/26): alguns itens têm custo médio cadastrado como
+    R$0,00 (ou poucos centavos) no próprio ERP — não é "sem cadastro", tem
+    valor, só que zerado/errado na origem. Sem essa checagem, 0 (ou quase
+    0) × fator ainda dá 0/frações de centavo (ex. R$0,002), e o ERP recusa
+    preço abaixo de 1 centavo na importação (menor valor de moeda real).
+    Tratado igual "sem custo": vira None, mesmo caminho de exclusão que já
+    existe pra falta de cadastro."""
+    if pd.isna(custo_medio) or custo_medio is None or custo_medio <= 0:
         return None
     faixa = faixa_preco(dias_venc)
     if faixa is None:
         return None
     n1, _ = _arvore_niveis(classif)
     fatores = _FATOR_PRECO_CAMPANHA if n1 == "CAMPANHA" else _FATOR_PRECO_PADRAO
-    return round(float(custo_medio) * fatores[faixa], 4)
+    preco = round(float(custo_medio) * fatores[faixa], 4)
+    return preco if preco >= 0.01 else None
 
 
 def enriquecer_precos(enr: pd.DataFrame) -> pd.DataFrame:
@@ -839,7 +849,7 @@ def _ean_valido(ean: str) -> bool:
 
 def exportar_erp_precos(
     enr: pd.DataFrame, overrides: dict[tuple[str, int], float] | None = None,
-) -> tuple[dict[str, str], int]:
+) -> tuple[dict[str, str], int, int]:
     """A partir do df de itens a vencer já enriquecido (`enriquecer_a_vencer`
     — precisa de dias_venc/custo_medio/cod_barras; classif é opcional, sem
     ela cai sempre na regra padrão), gera o texto dos arquivos de
@@ -858,7 +868,8 @@ def exportar_erp_precos(
 
     -> ({nome_do_arquivo: texto} só com as faixas que tiverem algum item,
     quantidade de linhas descartadas por código de barras inválido — ver
-    `_ean_valido`).
+    `_ean_valido` —, quantidade descartada por custo médio zerado/negativo
+    cadastrado no ERP — ver `sugerir_preco`).
     """
     faltando = {"dias_venc", "custo_medio", "cod_barras"} - set(enr.columns)
     if faltando:
@@ -866,6 +877,16 @@ def exportar_erp_precos(
 
     m = enriquecer_precos(enr)
     m["ean"] = m["cod_barras"].map(_ean_str)
+
+    # custo INVÁLIDO (zerado, negativo, ou baixo demais pro preço final dar
+    # 1 centavo) é diferente de SEM custo (NaN) -- aqui tem cadastro, só que
+    # com valor que não sustenta um preço de venda real. Contado antes do
+    # filtro de preco_sugerido.notna() (que já descarta os dois casos igual,
+    # via `sugerir_preco`) pra poder avisar Gabriel qual é o motivo real:
+    # tem faixa e tem custo cadastrado, só não gerou preço válido.
+    n_custo_zerado = int(((m["ean"] != "") & m["faixa_preco"].notna()
+                          & m["custo_medio"].notna() & m["preco_sugerido"].isna()).sum())
+
     m = m[(m["ean"] != "") & m["faixa_preco"].notna() & m["preco_sugerido"].notna()]
 
     if overrides:
@@ -884,7 +905,7 @@ def exportar_erp_precos(
         linhas = [f"A|{ean}|||{preco:.4f}" for ean, preco in
                   zip(por_ean["ean"], por_ean["preco_sugerido"])]
         saidas[NOME_ARQUIVO_PRECO[faixa]] = "\n".join(linhas)
-    return saidas, n_invalidos
+    return saidas, n_invalidos, n_custo_zerado
 
 
 # baldes de diagnóstico: onde a perda foi decidida

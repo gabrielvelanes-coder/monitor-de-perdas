@@ -1393,7 +1393,7 @@ def tela_itens_a_vencer():
                        "**CAMPANHA** foge da regra e usa markup crescente em vez de "
                        "desconto. Respeita o recorte de loja/urgência/regional acima; "
                        "acima de 120 dias fica no preço normal, sem arquivo.")
-            saidas, n_invalidos = core.exportar_erp_precos(enr, overrides=precos_editados)
+            saidas, n_invalidos, n_custo_zerado = core.exportar_erp_precos(enr, overrides=precos_editados)
             for col, faixa in zip(st.columns(4), core.FAIXAS_PRECO):
                 nome_arq = core.NOME_ARQUIVO_PRECO[faixa]
                 texto = saidas.get(nome_arq, "")
@@ -1414,6 +1414,12 @@ def tela_itens_a_vencer():
                            f"(coluna 'Cód. Barras/Etiqueta' do ERP mistura os dois). "
                            f"Corrigir o cadastro do EAN no ERP pra esses itens "
                            f"entrarem no arquivo.")
+            if n_custo_zerado:
+                st.caption(f":material/warning: {NUM(n_custo_zerado)} item(ns) ficaram de "
+                           f"fora — custo médio cadastrado no ERP é zero, negativo, ou baixo "
+                           f"demais (o preço calculado ficaria abaixo de 1 centavo, que o ERP "
+                           f"recusa). Corrigir o custo no ERP, ou editar o preço manualmente "
+                           f"na tabela abaixo pra esse item entrar mesmo assim.")
             if precos_editados:
                 c1, c2 = st.columns([4, 1])
                 c1.caption(f":material/edit: {NUM(len(precos_editados))} preço(s) editado(s) "
