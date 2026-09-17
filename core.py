@@ -308,6 +308,63 @@ def load_cadastro(sources, use_cache: bool = True) -> pd.DataFrame:
     return cad.reset_index(drop=True)
 
 
+_SUGES_MAP = [
+    ("loja",       lambda n: n.startswith("UN. NEG") or n == "UN NEG" or n == "UND ID"),
+    ("custo",      lambda n: n == "CUSTO"),
+    ("cod_barras", lambda n: "COD" in n and "BARRA" in n),
+]
+
+
+def load_base_suges(sources, use_cache: bool = True) -> pd.DataFrame:
+    """"Base suges" (sugestão de compra do ERP) -- fonte de custo mais
+    confiável que o "Custo Médio" do cadastro/DADOS. Achado real (17/09/26,
+    com Gabriel): comparando com um exemplo de caderno pré-vencido, o campo
+    "Custo Médio" (tanto aqui quanto no DADOS) fica zerado ou quase-zero em
+    ~26% da base inteira, sem motivo aparente -- mas o campo **"Custo"**
+    (coluna DIFERENTE, mesma planilha) continua plausível nesses mesmos
+    casos (813 confirmados: Custo Médio < 20% do Preço Referencial, Custo
+    entre 40%-105% dele). Junta por (loja, EAN) -- essa base tem
+    "Cód. de Barras" de verdade, não o "Cód. Barras/Etiqueta" ambíguo do
+    relatório de itens a vencer. Cobre ~61% dos itens a vencer (não é
+    universal; ver `calcular_fallback_custo` pro resto). -> loja, ean, custo.
+    """
+    are_paths = all(isinstance(s, (str, Path)) for s in sources)
+    if are_paths:
+        paths = [Path(s) for s in sources]
+        cp = _cache_path(paths, "suges")
+        if use_cache and cp.exists():
+            return pd.read_parquet(cp)
+
+    frames = []
+    for s in sources:
+        raw = _read_xlsx(s)
+        ren = {}
+        for c in raw.columns:
+            n = _ascii(c)
+            for dest, test in _SUGES_MAP:
+                if dest not in ren.values() and test(n):
+                    ren[c] = dest
+                    break
+        raw = raw.rename(columns=ren)
+        keep = [c for c in raw.columns if c in {d for d, _ in _SUGES_MAP}]
+        frames.append(raw[keep])
+
+    m = pd.concat(frames, ignore_index=True)
+    m["loja"] = pd.to_numeric(m["loja"], errors="coerce")
+    m["ean"] = m["cod_barras"].map(_ean_str)
+    m["custo"] = pd.to_numeric(m["custo"], errors="coerce")
+    m = m.dropna(subset=["loja"])
+    m = m[m["ean"] != ""]
+    m = m.drop_duplicates(["loja", "ean"])[["loja", "ean", "custo"]].reset_index(drop=True)
+
+    if are_paths and use_cache:
+        try:
+            m.to_parquet(cp)
+        except Exception:
+            pass
+    return m
+
+
 # catálogo nível-produto (BASE CADASTRO COM GRUPOS) — sem loja, chave = descrição
 _CAT_MAP = [
     ("produto",          lambda n: n in ("DESCRICAO", "PRODUTO")),
@@ -435,7 +492,9 @@ def load_itens_a_vencer(source) -> pd.DataFrame:
     return av.reset_index(drop=True)
 
 
-def enriquecer_a_vencer(av: pd.DataFrame, cad: pd.DataFrame | None) -> pd.DataFrame:
+def enriquecer_a_vencer(
+    av: pd.DataFrame, cad: pd.DataFrame | None, custo_suges: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     """Cruza itens a vencer com o cadastro (loja, produto) só para trazer custo
     médio (e `pvm`, Preço Venda Médio — referência de venda já cadastrada,
     usada só como fallback quando não existe custo válido em loja nenhuma,
@@ -443,13 +502,25 @@ def enriquecer_a_vencer(av: pd.DataFrame, cad: pd.DataFrame | None) -> pd.DataFr
     pré-vencido (não-negativo) x custo médio. Usa `saldo` (o que resta do
     pré-vencido) e não `estoque_atual` (estoque geral, que pode não bater
     com o saldo do lote — ver `load_itens_a_vencer`); cai para
-    `estoque_atual` só se o relatório não trouxer a coluna Saldo."""
+    `estoque_atual` só se o relatório não trouxer a coluna Saldo.
+
+    `custo_suges` (opcional, ver `load_base_suges`): quando dado, o campo
+    "Custo" de lá GANHA do "Custo Médio" do `cad` -- achado real (17/09/26):
+    "Custo Médio" (tanto no `cad`/DADOS quanto na própria base suges) fica
+    zerado/quase-zero sem motivo em ~26% da base, enquanto "Custo" continua
+    plausível nos mesmos casos. Junta por (loja, EAN), não (loja, produto)
+    -- EAN de verdade, sem a ambiguidade do "Cód. Barras/Etiqueta"."""
     m = av.copy()
     if cad is not None and not cad.empty and "custo_medio" in cad.columns:
         cols_cad = ["loja", "produto", "custo_medio"] + (["pvm"] if "pvm" in cad.columns else [])
         m = m.merge(cad[cols_cad], on=["loja", "produto"], how="left")
     else:
         m["custo_medio"] = pd.NA
+    if custo_suges is not None and not custo_suges.empty:
+        m["ean"] = m["cod_barras"].map(_ean_str)
+        m = m.merge(custo_suges[["loja", "ean", "custo"]], on=["loja", "ean"], how="left")
+        m["custo_medio"] = m["custo"].combine_first(m["custo_medio"])
+        m = m.drop(columns=["custo"])
     base_col = "saldo" if "saldo" in m.columns else "estoque_atual"
     m["estoque_pos"] = m[base_col].clip(lower=0)
     m["valor_exposto"] = m["estoque_pos"] * m["custo_medio"]

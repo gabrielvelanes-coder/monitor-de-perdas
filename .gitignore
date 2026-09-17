@@ -17,6 +17,10 @@ faturamento.json
 # de-para loja -> regional (rotativo — editado à mão, não versionado)
 regionais.csv
 
+# base de custo "sugestão de compra" (ERP, ~88MB nos 3 arquivos) — fonte de
+# custo mais confiável que o Custo Médio do DADOS, ver core.load_base_suges
+base suges*.xlsx
+
 
 !.streamlit/config.toml
 streamlit.log

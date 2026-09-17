@@ -126,6 +126,11 @@ def _catalogo(paths, sig):
     return core.load_catalogo(list(paths))
 
 
+@st.cache_data(show_spinner="Lendo base de custo (sugestão de compra)…")
+def _custo_suges(paths, sig):
+    return core.load_base_suges(list(paths))
+
+
 @st.cache_data(show_spinner="Lendo faturamento…")
 def _fat_arquivo(path, mtime):
     return core.load_faturamento(path)
@@ -191,6 +196,14 @@ def build_context() -> dict:
     elif auto_c:
         sig = tuple((Path(x).name, Path(x).stat().st_size) for x in auto_c)
         cad = _cadastro(tuple(auto_c), sig)
+
+    # base de custo "sugestão de compra" (opcional) -- fonte de custo mais
+    # confiável que o "Custo Médio" do DADOS, ver `core.load_base_suges`
+    auto_suges = _achar("base suges*.xlsx", "*sugest*compra*.xlsx")
+    custo_suges = None
+    if auto_suges:
+        sig_suges = tuple((Path(x).name, Path(x).stat().st_size) for x in auto_suges)
+        custo_suges = _custo_suges(tuple(auto_suges), sig_suges)
 
     # catálogo nível-produto (opcional) — só enriquece classif/curva
     auto_cat = _achar("BASE CADASTRO COM GRUPOS.xlsx", "*GRUPOS*.xlsx",
@@ -275,7 +288,8 @@ def build_context() -> dict:
                 vclass=vclass, n_meses=n_meses_perda, lojas_sel=lojas_sel,
                 meses_sel=meses_sel, psig=psig, csig=csig, catsig=catsig,
                 itens_a_vencer=itens_a_vencer, fonte_av=fonte_av,
-                fonte_av_mtime=fonte_av_mtime, loja_regional=loja_regional)
+                fonte_av_mtime=fonte_av_mtime, loja_regional=loja_regional,
+                custo_suges=custo_suges)
 
 
 def _editor_faturamento(perdas, fat):
@@ -1291,10 +1305,14 @@ def tela_itens_a_vencer():
                f"data de validade — para agir antes da perda acontecer · "
                f"fonte `{CTX['fonte_av']}` · atualizado em {atualizado}")
 
-    enr = core.enriquecer_a_vencer(av, CTX["cad"])
+    enr = core.enriquecer_a_vencer(av, CTX["cad"], CTX["custo_suges"])
     if CTX["cad"] is None:
         st.caption(":material/info: Sem cadastro (DADOS) carregado — mostrando só "
                    "unidades, sem valor em R$ (falta o custo médio por loja/produto).")
+    if CTX["custo_suges"] is not None:
+        st.caption(":material/verified: Usando custo da base \"sugestão de compra\" "
+                   "quando disponível (mais confiável que o Custo Médio do DADOS — "
+                   "cai pro Custo Médio só quando faltar).")
     if "saldo" not in enr.columns:
         st.caption(":material/warning: Relatório sem coluna **Saldo** — usando "
                    "**Estoque atual** (estoque geral, não restrito ao lote "
