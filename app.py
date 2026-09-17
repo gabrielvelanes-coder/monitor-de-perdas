@@ -1301,6 +1301,19 @@ def tela_itens_a_vencer():
                    "pré-vencido) como aproximação.")
     enr = core.enriquecer_precos(enr)
 
+    # Preço sugerido editável (17/09/26, pedido do Gabriel: "editar o preço
+    # sugerido e ao baixar o arquivo ele já trazer minha sugestão") -- guarda
+    # em session_state por (ean, faixa), a MESMA granularidade que
+    # `exportar_erp_precos` usa pra deduplicar (o arquivo do ERP não tem
+    # loja/lote, só 1 preço por EAN por faixa) -- editar 1 linha vale pra
+    # qualquer outro lote do mesmo EAN na mesma faixa, e sobrescreve o
+    # cálculo tanto na tela quanto nos 4 arquivos baixados.
+    precos_editados: dict[tuple[str, int], float] = st.session_state.setdefault("precos_editados", {})
+    enr["ean"] = enr["cod_barras"].map(core._ean_str)
+    if precos_editados:
+        for (ean_ed, faixa_ed), preco_ed in precos_editados.items():
+            enr.loc[(enr["ean"] == ean_ed) & (enr["faixa_preco"] == faixa_ed), "preco_sugerido"] = preco_ed
+
     c_reg, c_loja, c_urg = st.columns(3)
     regsel = _regional_local(enr, "av_regional", c_reg)
     if regsel:
@@ -1380,7 +1393,7 @@ def tela_itens_a_vencer():
                        "**CAMPANHA** foge da regra e usa markup crescente em vez de "
                        "desconto. Respeita o recorte de loja/urgência/regional acima; "
                        "acima de 120 dias fica no preço normal, sem arquivo.")
-            saidas, n_invalidos = core.exportar_erp_precos(enr)
+            saidas, n_invalidos = core.exportar_erp_precos(enr, overrides=precos_editados)
             for col, faixa in zip(st.columns(4), core.FAIXAS_PRECO):
                 nome_arq = core.NOME_ARQUIVO_PRECO[faixa]
                 texto = saidas.get(nome_arq, "")
@@ -1401,6 +1414,13 @@ def tela_itens_a_vencer():
                            f"(coluna 'Cód. Barras/Etiqueta' do ERP mistura os dois). "
                            f"Corrigir o cadastro do EAN no ERP pra esses itens "
                            f"entrarem no arquivo.")
+            if precos_editados:
+                c1, c2 = st.columns([4, 1])
+                c1.caption(f":material/edit: {NUM(len(precos_editados))} preço(s) editado(s) "
+                           f"manualmente na tabela abaixo — já aplicados nos arquivos acima.")
+                if c2.button("Desfazer edições", key="limpar_precos_editados"):
+                    st.session_state["precos_editados"] = {}
+                    st.rerun()
 
     with st.container(border=True):
         st.markdown("**Itens**")
@@ -1435,7 +1455,10 @@ def tela_itens_a_vencer():
                 cols.insert(cols.index("urgencia") + 1 if "urgencia" in cols else len(cols),
                             "custo_medio")
                 cols.insert(cols.index("custo_medio") + 1, "preco_sugerido")
-            tab = (enr_tab[cols].sort_values(
+            # "ean"/"faixa_preco" viajam escondidos (fora de `cols`, que é o
+            # que aparece na tela via column_order) só pra dar pra mapear uma
+            # edição de volta pro (ean, faixa) certo depois.
+            tab = (enr_tab[cols + ["ean", "faixa_preco"]].sort_values(
                 "valor_exposto" if tem_valor else "estoque_pos", ascending=False)
                 .head(500).reset_index(drop=True))
             for c in ("saldo", "estoque_atual", "dias_venc"):
@@ -1443,18 +1466,42 @@ def tela_itens_a_vencer():
                     tab[c] = tab[c].map(NUM)
             if "valor_exposto" in tab.columns:
                 tab["valor_exposto"] = tab["valor_exposto"].map(BRLc)
-            for c in ("custo_medio", "preco_sugerido"):
-                if c in tab.columns:
-                    tab[c] = tab[c].map(lambda v: "R$ " + PTNUM(v, 2) if pd.notna(v) else "—")
+            if "custo_medio" in tab.columns:
+                tab["custo_medio"] = tab["custo_medio"].map(
+                    lambda v: "R$ " + PTNUM(v, 2) if pd.notna(v) else "—")
             cfg = {"loja": "Loja", "produto": "Produto", "lote": "Lote",
                    "saldo": "Saldo (pré-vencido)", "estoque_atual": "Estoque atual (geral)",
                    "dias_venc": "Dias p/ vencer",
                    "data_validade": st.column_config.DateColumn("Validade", format="DD/MM/YYYY"),
                    "urgencia": "Urgência", "custo_medio": "Custo médio",
-                   "preco_sugerido": "Preço sugerido",
+                   "preco_sugerido": st.column_config.NumberColumn(
+                       "Preço sugerido (editável)", format="R$ %.2f", step=0.01, min_value=0.0),
                    "curva_qtd": "Curva", "macro": "Categoria",
                    "valor_exposto": "R$ exposto"}
-            st.dataframe(tab, hide_index=True, width="stretch", height=380, column_config=cfg)
+            if "preco_sugerido" in cols:
+                tab_editada = st.data_editor(
+                    tab, hide_index=True, width="stretch", height=380, column_config=cfg,
+                    column_order=cols, disabled=[c for c in cols if c != "preco_sugerido"],
+                    key="editor_itens_a_vencer")
+                # o que mudou vira override em session_state por (ean, faixa)
+                # -- mesma granularidade de `exportar_erp_precos` (o arquivo
+                # do ERP não tem loja/lote, só 1 preço por EAN por faixa), e
+                # `st.rerun()` garante que os cartões/downloads acima (que já
+                # renderizaram nesta mesma execução) reflitam a edição na
+                # hora, não só na próxima interação.
+                antes = tab["preco_sugerido"].fillna(-1)
+                depois = tab_editada["preco_sugerido"].fillna(-1)
+                mudou = antes != depois
+                if mudou.any():
+                    for _, row in tab_editada[mudou].iterrows():
+                        if pd.notna(row["ean"]) and row["ean"] and pd.notna(row["faixa_preco"]) \
+                                and pd.notna(row["preco_sugerido"]):
+                            chave = (row["ean"], int(row["faixa_preco"]))
+                            st.session_state["precos_editados"][chave] = float(row["preco_sugerido"])
+                    st.rerun()
+            else:
+                st.dataframe(tab, hide_index=True, width="stretch", height=380,
+                             column_config=cfg, column_order=cols)
             if len(enr_tab) > 500:
                 st.caption(f"Mostrando as 500 maiores de {len(enr_tab)} linhas — o CSV traz todas.")
         st.download_button("Baixar (CSV)", enr_tab.to_csv(index=False).encode("utf-8-sig"),

@@ -837,7 +837,9 @@ def _ean_valido(ean: str) -> bool:
     return ean.isdigit() and len(ean) >= 8
 
 
-def exportar_erp_precos(enr: pd.DataFrame) -> tuple[dict[str, str], int]:
+def exportar_erp_precos(
+    enr: pd.DataFrame, overrides: dict[tuple[str, int], float] | None = None,
+) -> tuple[dict[str, str], int]:
     """A partir do df de itens a vencer já enriquecido (`enriquecer_a_vencer`
     — precisa de dias_venc/custo_medio/cod_barras; classif é opcional, sem
     ela cai sempre na regra padrão), gera o texto dos arquivos de
@@ -850,6 +852,10 @@ def exportar_erp_precos(enr: pd.DataFrame) -> tuple[dict[str, str], int]:
     2 lotes do mesmo EAN geram o mesmo preço (mesma fórmula), então só 1
     linha por EAN.
 
+    `overrides` (opcional): `{(ean, faixa): preco}` pra sobrescrever o preço
+    calculado em casos específicos (Gabriel editando na tela "Itens a
+    vencer") — aplicado por cima do cálculo, antes de deduplicar por EAN.
+
     -> ({nome_do_arquivo: texto} só com as faixas que tiverem algum item,
     quantidade de linhas descartadas por código de barras inválido — ver
     `_ean_valido`).
@@ -861,6 +867,10 @@ def exportar_erp_precos(enr: pd.DataFrame) -> tuple[dict[str, str], int]:
     m = enriquecer_precos(enr)
     m["ean"] = m["cod_barras"].map(_ean_str)
     m = m[(m["ean"] != "") & m["faixa_preco"].notna() & m["preco_sugerido"].notna()]
+
+    if overrides:
+        for (ean_o, faixa_o), preco_o in overrides.items():
+            m.loc[(m["ean"] == ean_o) & (m["faixa_preco"] == faixa_o), "preco_sugerido"] = preco_o
 
     n_invalidos = int((~m["ean"].map(_ean_valido)).sum())
     m = m[m["ean"].map(_ean_valido)]
