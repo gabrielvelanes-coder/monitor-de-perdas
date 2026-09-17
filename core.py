@@ -437,15 +437,17 @@ def load_itens_a_vencer(source) -> pd.DataFrame:
 
 def enriquecer_a_vencer(av: pd.DataFrame, cad: pd.DataFrame | None) -> pd.DataFrame:
     """Cruza itens a vencer com o cadastro (loja, produto) só para trazer custo
-    médio; estima valor_exposto = saldo do lote pré-vencido (não-negativo) x
-    custo médio. Usa `saldo` (o que resta do pré-vencido) e não `estoque_atual`
-    (estoque geral, que pode não bater com o saldo do lote — ver
-    `load_itens_a_vencer`); cai para `estoque_atual` só se o relatório não
-    trouxer a coluna Saldo."""
+    médio (e `pvm`, Preço Venda Médio — referência de venda já cadastrada,
+    usada só como fallback quando não existe custo válido em loja nenhuma,
+    ver `calcular_fallback_custo`); estima valor_exposto = saldo do lote
+    pré-vencido (não-negativo) x custo médio. Usa `saldo` (o que resta do
+    pré-vencido) e não `estoque_atual` (estoque geral, que pode não bater
+    com o saldo do lote — ver `load_itens_a_vencer`); cai para
+    `estoque_atual` só se o relatório não trouxer a coluna Saldo."""
     m = av.copy()
     if cad is not None and not cad.empty and "custo_medio" in cad.columns:
-        m = m.merge(cad[["loja", "produto", "custo_medio"]], on=["loja", "produto"],
-                    how="left")
+        cols_cad = ["loja", "produto", "custo_medio"] + (["pvm"] if "pvm" in cad.columns else [])
+        m = m.merge(cad[cols_cad], on=["loja", "produto"], how="left")
     else:
         m["custo_medio"] = pd.NA
     base_col = "saldo" if "saldo" in m.columns else "estoque_atual"
@@ -847,6 +849,66 @@ def _ean_valido(ean: str) -> bool:
     return ean.isdigit() and len(ean) >= 8
 
 
+def calcular_fallback_custo(enr: pd.DataFrame) -> dict[tuple[str, int], float]:
+    """Quando um item não tem custo médio válido (ver `sugerir_preco`) pra
+    uma faixa, tenta resgatar o preço em 2 níveis, nessa ordem — decidido
+    com Gabriel (17/09/26) depois de medir o tamanho de cada caso:
+
+    1. Maior custo médio válido do MESMO EAN em OUTRA loja (o produto é o
+       mesmo, só não foi bem cadastrado nessa loja específica — achado:
+       15 de 99 EANs com custo inválido em algum lugar se resolvem assim).
+    2. Se nem isso existir (custo inválido em TODAS as lojas), usa o maior
+       Preço Venda Médio (`pvm`) encontrado pro EAN como base, aplicando o
+       MESMO fator de desconto por faixa que se aplicaria ao custo — achado:
+       37 dos 86 EANs sem custo em lugar nenhum tinham preço de referência
+       utilizável.
+
+    O que sobra sem solução nas duas tentativas (49 EANs + os com EAN
+    inválido) precisa de correção manual no ERP mesmo -- não dá pra
+    inventar preço sem nenhuma base de dado real.
+
+    -> `{(ean, faixa): preco}` só com os casos resgatados -- NÃO mexe em
+    item que já tem custo válido. Passar como (parte do) `overrides` de
+    `exportar_erp_precos`."""
+    m = enr.copy()
+    m["ean"] = m["cod_barras"].map(_ean_str)
+    base = m[(m["ean"] != "") & m["faixa_preco"].notna()].copy()
+    if base.empty:
+        return {}
+
+    def _valido(row):
+        return sugerir_preco(row["dias_venc"], row["custo_medio"], row.get("classif")) is not None
+    base["custo_valido"] = base.apply(_valido, axis=1)
+
+    tem_pvm = "pvm" in base.columns
+    overrides: dict[tuple[str, int], float] = {}
+    for ean, grupo in base.groupby("ean"):
+        invalidos_grupo = grupo[~grupo["custo_valido"]]
+        if invalidos_grupo.empty:
+            continue
+        validos = grupo[grupo["custo_valido"]]
+        maior_custo = validos["custo_medio"].max() if not validos.empty else None
+        maior_pvm = None
+        if tem_pvm:
+            pvm_valido = grupo[grupo["pvm"] > 0]
+            maior_pvm = pvm_valido["pvm"].max() if not pvm_valido.empty else None
+        base_custo = maior_custo if maior_custo is not None else maior_pvm
+        if base_custo is None:
+            continue  # sem custo E sem pvm em lugar nenhum -- fica sem solução automática
+        classif = invalidos_grupo["classif"].iloc[0] if "classif" in invalidos_grupo.columns else None
+        for faixa in invalidos_grupo["faixa_preco"].unique():
+            faixa_int = int(faixa)
+            if (ean, faixa_int) in overrides:
+                continue
+            # `faixa_preco(faixa_int) == faixa_int` sempre (limite exato de
+            # FAIXAS_PRECO), então passar a própria faixa como "dias_venc"
+            # devolve o fator certo sem duplicar a lógica de `sugerir_preco`.
+            preco = sugerir_preco(faixa_int, base_custo, classif)
+            if preco is not None:
+                overrides[(ean, faixa_int)] = preco
+    return overrides
+
+
 def exportar_erp_precos(
     enr: pd.DataFrame, overrides: dict[tuple[str, int], float] | None = None,
 ) -> tuple[dict[str, str], int, int]:
@@ -863,13 +925,17 @@ def exportar_erp_precos(
     linha por EAN.
 
     `overrides` (opcional): `{(ean, faixa): preco}` pra sobrescrever o preço
-    calculado em casos específicos (Gabriel editando na tela "Itens a
-    vencer") — aplicado por cima do cálculo, antes de deduplicar por EAN.
+    calculado em casos específicos (resgate automático de
+    `calcular_fallback_custo` e/ou edição manual do Gabriel na tela "Itens
+    a vencer") — aplicado ANTES de descartar linha sem preço válido (senão
+    um item com custo inválido, que só existe graças ao override, nunca
+    chegaria a receber o preço editado — bug real corrigido 17/09/26: a
+    ordem antiga descartava a linha antes de checar `overrides`).
 
     -> ({nome_do_arquivo: texto} só com as faixas que tiverem algum item,
     quantidade de linhas descartadas por código de barras inválido — ver
     `_ean_valido` —, quantidade descartada por custo médio zerado/negativo
-    cadastrado no ERP — ver `sugerir_preco`).
+    cadastrado no ERP (depois de aplicar `overrides`) — ver `sugerir_preco`).
     """
     faltando = {"dias_venc", "custo_medio", "cod_barras"} - set(enr.columns)
     if faltando:
@@ -877,21 +943,20 @@ def exportar_erp_precos(
 
     m = enriquecer_precos(enr)
     m["ean"] = m["cod_barras"].map(_ean_str)
-
-    # custo INVÁLIDO (zerado, negativo, ou baixo demais pro preço final dar
-    # 1 centavo) é diferente de SEM custo (NaN) -- aqui tem cadastro, só que
-    # com valor que não sustenta um preço de venda real. Contado antes do
-    # filtro de preco_sugerido.notna() (que já descarta os dois casos igual,
-    # via `sugerir_preco`) pra poder avisar Gabriel qual é o motivo real:
-    # tem faixa e tem custo cadastrado, só não gerou preço válido.
-    n_custo_zerado = int(((m["ean"] != "") & m["faixa_preco"].notna()
-                          & m["custo_medio"].notna() & m["preco_sugerido"].isna()).sum())
-
-    m = m[(m["ean"] != "") & m["faixa_preco"].notna() & m["preco_sugerido"].notna()]
+    m = m[(m["ean"] != "") & m["faixa_preco"].notna()]
 
     if overrides:
         for (ean_o, faixa_o), preco_o in overrides.items():
             m.loc[(m["ean"] == ean_o) & (m["faixa_preco"] == faixa_o), "preco_sugerido"] = preco_o
+
+    # custo INVÁLIDO (zerado, negativo, ou baixo demais pro preço final dar
+    # 1 centavo) é diferente de SEM custo (NaN) -- aqui tem cadastro, só que
+    # com valor que não sustenta um preço de venda real. Contado DEPOIS de
+    # aplicar overrides (um item resgatado ou editado não conta mais como
+    # pendência) pra avisar Gabriel só do que realmente ainda falta.
+    n_custo_zerado = int((m["custo_medio"].notna() & m["preco_sugerido"].isna()).sum())
+
+    m = m[m["preco_sugerido"].notna()]
 
     n_invalidos = int((~m["ean"].map(_ean_valido)).sum())
     m = m[m["ean"].map(_ean_valido)]

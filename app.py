@@ -1310,8 +1310,16 @@ def tela_itens_a_vencer():
     # cálculo tanto na tela quanto nos 4 arquivos baixados.
     precos_editados: dict[tuple[str, int], float] = st.session_state.setdefault("precos_editados", {})
     enr["ean"] = enr["cod_barras"].map(core._ean_str)
-    if precos_editados:
-        for (ean_ed, faixa_ed), preco_ed in precos_editados.items():
+
+    # Resgate automático (17/09/26) pra item com custo inválido: 1º tenta o
+    # maior custo válido do mesmo EAN em outra loja, senão usa o Preço Venda
+    # Médio de referência com o mesmo fator de desconto -- ver
+    # `calcular_fallback_custo`. Edição manual sempre ganha do resgate
+    # automático quando os dois existem pro mesmo (ean, faixa).
+    fallback_custo = core.calcular_fallback_custo(enr)
+    overrides_precos: dict[tuple[str, int], float] = {**fallback_custo, **precos_editados}
+    if overrides_precos:
+        for (ean_ed, faixa_ed), preco_ed in overrides_precos.items():
             enr.loc[(enr["ean"] == ean_ed) & (enr["faixa_preco"] == faixa_ed), "preco_sugerido"] = preco_ed
 
     c_reg, c_loja, c_urg = st.columns(3)
@@ -1393,7 +1401,7 @@ def tela_itens_a_vencer():
                        "**CAMPANHA** foge da regra e usa markup crescente em vez de "
                        "desconto. Respeita o recorte de loja/urgência/regional acima; "
                        "acima de 120 dias fica no preço normal, sem arquivo.")
-            saidas, n_invalidos, n_custo_zerado = core.exportar_erp_precos(enr, overrides=precos_editados)
+            saidas, n_invalidos, n_custo_zerado = core.exportar_erp_precos(enr, overrides=overrides_precos)
             for col, faixa in zip(st.columns(4), core.FAIXAS_PRECO):
                 nome_arq = core.NOME_ARQUIVO_PRECO[faixa]
                 texto = saidas.get(nome_arq, "")
@@ -1414,16 +1422,24 @@ def tela_itens_a_vencer():
                            f"(coluna 'Cód. Barras/Etiqueta' do ERP mistura os dois). "
                            f"Corrigir o cadastro do EAN no ERP pra esses itens "
                            f"entrarem no arquivo.")
+            if fallback_custo:
+                st.caption(f":material/auto_fix_high: {NUM(len(fallback_custo))} preço(s) "
+                           f"resgatado(s) automaticamente — custo inválido nessa loja, "
+                           f"usado o maior custo válido do mesmo produto em outra loja "
+                           f"(ou, na falta desse, o Preço Venda Médio de referência) já "
+                           f"aplicados nos arquivos acima.")
             if n_custo_zerado:
-                st.caption(f":material/warning: {NUM(n_custo_zerado)} item(ns) ficaram de "
-                           f"fora — custo médio cadastrado no ERP é zero, negativo, ou baixo "
-                           f"demais (o preço calculado ficaria abaixo de 1 centavo, que o ERP "
-                           f"recusa). Corrigir o custo no ERP, ou editar o preço manualmente "
-                           f"na tabela abaixo pra esse item entrar mesmo assim.")
+                st.caption(f":material/warning: {NUM(n_custo_zerado)} item(ns) AINDA ficaram "
+                           f"de fora — custo médio zerado/negativo/baixo demais no ERP, e "
+                           f"sem custo válido ou Preço Venda Médio em nenhuma loja pra "
+                           f"resgatar automaticamente. Corrigir o custo no ERP, ou editar o "
+                           f"preço manualmente na tabela abaixo pra esse item entrar mesmo "
+                           f"assim.")
             if precos_editados:
                 c1, c2 = st.columns([4, 1])
                 c1.caption(f":material/edit: {NUM(len(precos_editados))} preço(s) editado(s) "
-                           f"manualmente na tabela abaixo — já aplicados nos arquivos acima.")
+                           f"manualmente na tabela abaixo — já aplicados nos arquivos acima "
+                           f"(ganham do resgate automático quando os dois existem).")
                 if c2.button("Desfazer edições", key="limpar_precos_editados"):
                     st.session_state["precos_editados"] = {}
                     st.rerun()
