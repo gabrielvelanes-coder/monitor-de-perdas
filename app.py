@@ -1464,7 +1464,7 @@ def tela_itens_a_vencer():
 
     with st.container(border=True):
         st.markdown("**Itens**")
-        c_faixa_f, c_busca_f = st.columns([2, 1])
+        c_faixa_f, c_busca_f, c_busca_x = st.columns([2, 1, 0.15])
         rot_faixa = {f: f"{f} dias" for f in core.FAIXAS_PRECO}
         faixa_sel = c_faixa_f.multiselect(
             "Faixa de preço (só filtra esta tabela — cards e downloads acima continuam "
@@ -1473,6 +1473,10 @@ def tela_itens_a_vencer():
             format_func=lambda f: rot_faixa[f], placeholder="todas as faixas")
         busca = c_busca_f.text_input(
             "Buscar (produto ou EAN)", key="av_busca", placeholder="nome ou código de barras")
+        c_busca_x.markdown("<div style='height:1.9rem'></div>", unsafe_allow_html=True)
+        if c_busca_x.button("✕", key="av_busca_limpar", help="Limpar busca", disabled=not busca):
+            st.session_state["av_busca"] = ""
+            st.rerun()
         enr_tab = enr[enr["faixa_preco"].isin(faixa_sel)] if faixa_sel else enr
         if busca.strip():
             alvo = busca.strip().casefold()
