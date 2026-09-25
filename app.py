@@ -53,6 +53,15 @@ PERDAS_BANCO_DESDE = "2026-01-01"
 # loja), em vez da "base suges" (arquivo manual). Mesmo esquema de
 # fallback automático do USAR_BANCO_PERDAS.
 USAR_BANCO_CUSTO = True
+# Itens a vencer, Faturamento, Catálogo e Cadastro (DADOS) também direto
+# do banco -- mesmo esquema de fallback automático pro arquivo. Cadastro
+# usa 3 métricas calculadas (mvm/pvm/ult_venda_dias/ult_compra_dias, ver
+# erp_banco.CONSULTA_CADASTRO) ainda não confirmadas com o Gabriel se
+# batem com o critério real da "Sugestão de Compra".
+USAR_BANCO_AVENCER = True
+USAR_BANCO_FATURAMENTO = True
+USAR_BANCO_CATALOGO = True
+USAR_BANCO_CADASTRO = True
 # (2026-09-12): o fluxo real é sempre soltar o arquivo na pasta (auto-detect);
 # vira True de novo se precisar testar um relatório pontual sem renomear/mover.
 MOSTRAR_DIGITAR_FATURAMENTO = False  # editor manual de faturamento — oculto a
@@ -156,9 +165,29 @@ def _fat_arquivo(path, mtime):
     return core.load_faturamento(path)
 
 
+@st.cache_data(show_spinner="Buscando faturamento no banco do ERP…", ttl=900)
+def _fat_banco(desde: str):
+    return core.load_faturamento_do_banco(desde)
+
+
 @st.cache_data(show_spinner="Lendo itens a vencer…")
 def _a_vencer(path, mtime):
     return core.load_itens_a_vencer(path)
+
+
+@st.cache_data(show_spinner="Buscando itens a vencer no banco do ERP…", ttl=900)
+def _av_banco():
+    return core.load_itens_a_vencer_do_banco()
+
+
+@st.cache_data(show_spinner="Buscando catálogo no banco do ERP…", ttl=900)
+def _catalogo_banco():
+    return core.load_catalogo_do_banco()
+
+
+@st.cache_data(show_spinner="Buscando cadastro no banco do ERP…", ttl=900)
+def _cadastro_banco(pares: tuple):
+    return core.load_cadastro_do_banco(list(pares))
 
 
 @st.cache_data(show_spinner="Cruzando com o cadastro…")
@@ -184,6 +213,18 @@ def build_context() -> dict:
     # sempre reserva o topo da sidebar pro menu, não dá pra "furar a fila"
     # com markdown normal, mesmo chamando antes no script).
     st.logo(str(PASTA / "assets" / "logo.svg"), size="large")
+
+    # "Atualizar agora" -- limpa o cache dos dados vindos do banco do ERP
+    # (normalmente atualiza sozinho a cada 15min, ttl=900 nos caches acima)
+    # e força buscar de novo na hora, sem esperar o TTL vencer.
+    if st.sidebar.button("Atualizar agora", icon=":material/sync:",
+                         help="Busca os dados do banco do ERP de novo agora, "
+                              "sem esperar os 15 minutos do cache."):
+        for fn in (_perdas_banco, _custo_banco, _av_banco, _catalogo_banco,
+                  _cadastro_banco, _fat_banco):
+            fn.clear()
+        st.toast("Atualizando do banco do ERP…", icon=":material/sync:")
+        st.rerun()
 
     up_p = up_c = up_cat = up_f = up_av = None
     if MOSTRAR_FONTES_DADOS:
@@ -224,12 +265,45 @@ def build_context() -> dict:
         st.error(msg, icon=":material/upload_file:")
         st.stop()
 
-    # cadastro (opcional)
+    # itens a vencer (opcional) — estoque atual com lote/validade, por loja.
+    # Banco em 1º lugar (`itemprevencido`), cai pro arquivo/upload se falhar
+    # ou estiver desligado (USAR_BANCO_AVENCER = False). Carregado ANTES do
+    # cadastro porque o cadastro (abaixo) usa os pares loja+produto daqui.
+    auto_av = _achar("itens*a*vencer*.xls*", "*a vencer*.xls*", "*validade*.xls*")
+    itens_a_vencer, fonte_av, fonte_av_mtime, erro_banco_av = None, None, None, None
+    if up_av is not None:
+        itens_a_vencer, fonte_av = core.load_itens_a_vencer(up_av), up_av.name
+        fonte_av_mtime = datetime.now()  # upload manual = a atualização é agora
+    elif USAR_BANCO_AVENCER:
+        try:
+            itens_a_vencer = _av_banco()
+            fonte_av, fonte_av_mtime = "Banco do ERP (ao vivo)", datetime.now()
+        except Exception as e:
+            erro_banco_av = str(e)
+    if itens_a_vencer is None and auto_av:
+        itens_a_vencer = _a_vencer(auto_av[0], Path(auto_av[0]).stat().st_mtime)
+        fonte_av = Path(auto_av[0]).name + (" (banco do ERP indisponível, usando arquivo)" if erro_banco_av else "")
+        fonte_av_mtime = datetime.fromtimestamp(Path(auto_av[0]).stat().st_mtime)
+
+    # cadastro (opcional) -- banco do ERP em 1º lugar (curva por loja +
+    # motivo de suspensão + estoque, direto do ERP; mvm/pvm/ult_venda_dias/
+    # ult_compra_dias calculados, ver `core.load_cadastro_do_banco`), só
+    # pras combinações loja+produto que Perdas/Itens a vencer já trouxeram
+    # (achado 25/09/26: catálogo inteiro x 23 lojas trazia muito ruído).
+    # Cai pros arquivos DADOS*.xlsx se o banco falhar/estiver desligado.
     auto_c = _achar("DADOS*.xlsx", "*cadastro*.xlsx")
     cad = None
     if up_c:
         cad = core.load_cadastro(up_c)
-    elif auto_c:
+    elif USAR_BANCO_CADASTRO:
+        try:
+            pares = set(perdas[["loja", "produto"]].dropna().itertuples(index=False, name=None))
+            if itens_a_vencer is not None:
+                pares |= set(itens_a_vencer[["loja", "produto"]].dropna().itertuples(index=False, name=None))
+            cad = _cadastro_banco(tuple(sorted(pares)))
+        except Exception:
+            cad = None
+    if cad is None and auto_c:
         sig = tuple((Path(x).name, Path(x).stat().st_size) for x in auto_c)
         cad = _cadastro(tuple(auto_c), sig)
 
@@ -252,36 +326,43 @@ def build_context() -> dict:
             custo_suges = _custo_suges(tuple(auto_suges), sig_suges)
             fonte_custo = "\"base suges\" (arquivo)" + (" — banco do ERP indisponível" if USAR_BANCO_CUSTO else "")
 
-    # catálogo nível-produto (opcional) — só enriquece classif/curva
+    # catálogo nível-produto (opcional) — só enriquece classif/curva.
+    # Banco em 1º lugar (classificação + curva ABC global), cai pro arquivo
+    # BASE CADASTRO COM GRUPOS.xlsx se falhar/estiver desligado.
     auto_cat = _achar("BASE CADASTRO COM GRUPOS.xlsx", "*GRUPOS*.xlsx",
                       "*cadastro*grupos*.xlsx")
     catalogo = None
     if up_cat is not None:
         catalogo = core.load_catalogo([up_cat])
-    elif auto_cat:
+    elif USAR_BANCO_CATALOGO:
+        try:
+            catalogo = _catalogo_banco()
+        except Exception:
+            pass
+    if catalogo is None and auto_cat:
         csig_cat = tuple((Path(x).name, Path(x).stat().st_size) for x in auto_cat)
         catalogo = _catalogo(tuple(auto_cat), csig_cat)
 
-    # faturamento (opcional)
+    # faturamento (opcional) -- banco do ERP em 1º lugar (itemvenda, TODO
+    # produto), cai pro faturamento.csv/digitado se falhar/estiver desligado.
     auto_f = _achar("faturamento.csv", "faturamento.xlsx", "*faturamento*.csv")
     fat = pd.DataFrame(columns=["loja", "ano_mes", "faturamento"])
+    fonte_fat = None
     if up_f is not None:
         fat = core.load_faturamento(up_f)
-    elif auto_f:
+        fonte_fat = up_f.name
+    elif USAR_BANCO_FATURAMENTO:
+        try:
+            fat = _fat_banco(PERDAS_BANCO_DESDE)
+            fonte_fat = "Banco do ERP (ao vivo)"
+        except Exception:
+            pass
+    if fonte_fat is None and auto_f:
         fat = _fat_arquivo(auto_f[0], Path(auto_f[0]).stat().st_mtime)
-    elif FAT_JSON.exists():
+        fonte_fat = Path(auto_f[0]).name
+    elif fonte_fat is None and FAT_JSON.exists():
         fat = pd.DataFrame(json.loads(FAT_JSON.read_text(encoding="utf-8")))
-
-    # itens a vencer (opcional) — estoque atual com lote/validade, por loja
-    auto_av = _achar("itens*a*vencer*.xls*", "*a vencer*.xls*", "*validade*.xls*")
-    itens_a_vencer, fonte_av, fonte_av_mtime = None, None, None
-    if up_av is not None:
-        itens_a_vencer, fonte_av = core.load_itens_a_vencer(up_av), up_av.name
-        fonte_av_mtime = datetime.now()  # upload manual = a atualização é agora
-    elif auto_av:
-        itens_a_vencer = _a_vencer(auto_av[0], Path(auto_av[0]).stat().st_mtime)
-        fonte_av = Path(auto_av[0]).name
-        fonte_av_mtime = datetime.fromtimestamp(Path(auto_av[0]).stat().st_mtime)
+        fonte_fat = "digitado na barra lateral"
 
     # regionais (opcional) — de-para loja -> regional, rotativo, editado à mão
     auto_reg = _achar("regionais.csv", "*regional*.csv")
@@ -336,7 +417,7 @@ def build_context() -> dict:
                 meses_sel=meses_sel, psig=psig, csig=csig, catsig=catsig,
                 itens_a_vencer=itens_a_vencer, fonte_av=fonte_av,
                 fonte_av_mtime=fonte_av_mtime, loja_regional=loja_regional,
-                custo_suges=custo_suges, fonte_custo=fonte_custo)
+                custo_suges=custo_suges, fonte_custo=fonte_custo, fonte_fat=fonte_fat)
 
 
 def _editor_faturamento(perdas, fat):

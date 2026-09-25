@@ -341,6 +341,41 @@ def load_cadastro(sources, use_cache: bool = True) -> pd.DataFrame:
     return cad.reset_index(drop=True)
 
 
+def load_cadastro_do_banco(pares: list[tuple[int, str]]) -> pd.DataFrame:
+    """Cadastro direto do banco (substitui os arquivos DADOS*.xlsx) --
+    curva ABC POR LOJA, motivo de suspensão de compra e estoque atual são
+    campo direto do ERP; `mvm`/`pvm`/`ult_venda_dias`/`ult_compra_dias`
+    são CALCULADOS (ver `erp_banco.CONSULTA_CADASTRO` pra definição exata
+    e ressalva) -- ainda não confirmados com o Gabriel se batem com o
+    critério da "Sugestão de Compra" original, vale validar.
+
+    `pares`: lista de (loja, produto) -- só busca as combinações que
+    Perdas/Itens a vencer já carregaram (achado 25/09/26: o catálogo
+    inteiro x 23 lojas trazia muito mais ruído do que os arquivos DADOS
+    reais tinham). `custo_medio` não vem daqui — usar `load_custo_do_banco`
+    (grão EAN, cobertura bem melhor).
+
+    -> loja, produto, curva_valor, curva_qtd, estoque, motivo_susp, mvm,
+       pvm, ult_venda_dias, ult_compra_dias (mesmos nomes de `load_cadastro`,
+       sem custo_medio/fabricante/principio)."""
+    import erp_banco
+
+    # unidadenegocio.codigo é zero-padded ("02", não "2") -- sem isso o
+    # JOIN falha silenciosamente pra toda loja de 1 dígito (achado real
+    # 25/09/26: 3.165 de 8.106 pares sem match nenhum, todos de lojas < 10).
+    pares_str = [(str(int(loja)).zfill(2), str(produto)) for loja, produto in pares]
+    cad = erp_banco.consultar_cadastro(pares_str)
+    if cad.empty:
+        return cad
+
+    cad["loja"] = pd.to_numeric(cad["loja"], errors="coerce")
+    cad["produto"] = cad["produto"].astype(str).str.strip()
+    for c in ("mvm", "pvm", "ult_venda_dias", "ult_compra_dias", "estoque"):
+        cad[c] = pd.to_numeric(cad[c], errors="coerce")
+    cad = cad.dropna(subset=["loja", "produto"]).drop_duplicates(["loja", "produto"])
+    return cad.reset_index(drop=True)
+
+
 _SUGES_MAP = [
     ("loja",       lambda n: n.startswith("UN. NEG") or n == "UN NEG" or n == "UND ID"),
     ("custo",      lambda n: n == "CUSTO"),
@@ -486,6 +521,25 @@ def load_catalogo(sources, use_cache: bool = True) -> pd.DataFrame:
     return cat
 
 
+def load_catalogo_do_banco() -> pd.DataFrame:
+    """Catálogo direto do banco (substitui BASE CADASTRO COM GRUPOS.xlsx) --
+    classificação (árvore ARVORE NOVA) + curva ABC global (produto, sem
+    loja — ver `load_cadastro_do_banco` pra curva por loja). Mesma saída
+    de `load_catalogo` (produto normalizado, classif_cat, curva_valor_cat,
+    curva_qtd_cat, status_cadastro, fabricante_cat)."""
+    import erp_banco
+
+    cat = erp_banco.consultar_catalogo()
+    if cat.empty:
+        raise ValueError("Banco do ERP devolveu 0 linhas de catálogo.")
+
+    cat["produto"] = cat["produto"].map(_norm_produto)
+    cat = cat[cat["produto"].str.len() > 0]
+    cat = cat.sort_values("status_cadastro", na_position="last")
+    cat = cat.drop_duplicates("produto", keep="first").reset_index(drop=True)
+    return cat
+
+
 # ----------------------------------------------------------------------------- #
 # 3b. itens a vencer (estoque atual com lote/validade, por loja)
 # ----------------------------------------------------------------------------- #
@@ -555,6 +609,42 @@ def load_itens_a_vencer(source) -> pd.DataFrame:
     return av.reset_index(drop=True)
 
 
+# Achado real 25/09/26: 1 lote (LANCETA ACCU CHEK FASTCLIX, lote WPK193A)
+# tinha `quantidadeinicial = 31.122.025` no ERP -- erro de digitação na
+# origem (o mesmo lote no arquivo manual antigo tinha saldo=1). Sem filtro,
+# esse 1 registro sozinho inflava o "estoque exposto" de ~R$300 mil pra
+# R$1,7 BILHÃO. Not a bug daqui -- distribuição real confirma outlier
+# isolado (2º maior saldo real é 119, ou seja 260 mil x menor que esse).
+# `LIMITE_SALDO_PLAUSIVEL` bem folgado (não teria excluído nenhum saldo
+# real já visto) só pra blindar contra erro de digitação como esse.
+LIMITE_SALDO_PLAUSIVEL = 100_000
+
+
+def load_itens_a_vencer_do_banco() -> pd.DataFrame:
+    """Itens a vencer direto do banco (`itemprevencido`) -- mesma saída de
+    `load_itens_a_vencer`. Filtro `datavalidade >= hoje` (já vencido não é
+    mais "a vencer", vira Perdas quando alguém baixar) validado em 25/09/26
+    contra o arquivo manual: 4.696 lotes no banco vs. 4.761 no último
+    arquivo — bate. Também filtra saldo implausível (ver
+    `LIMITE_SALDO_PLAUSIVEL`) -- vale o Gabriel corrigir o lote na origem
+    (ERP) quando puder, aqui só evita que 1 erro de digitação estoure o
+    "estoque exposto" da tela inteira."""
+    import erp_banco
+
+    av = erp_banco.consultar_itens_a_vencer()
+    if av.empty:
+        raise ValueError("Banco do ERP devolveu 0 linhas de itens a vencer.")
+
+    av["loja"] = pd.to_numeric(av["loja"], errors="coerce")
+    av["produto"] = av["produto"].astype(str).str.strip()
+    for c in ("estoque_atual", "qtd_inicial", "qtd_movimentada", "saldo", "dias_venc"):
+        av[c] = pd.to_numeric(av[c], errors="coerce")
+    av["data_validade"] = pd.to_datetime(av["data_validade"], errors="coerce")
+    av = av.dropna(subset=["loja", "produto"])
+    av = av[av["saldo"].fillna(0) <= LIMITE_SALDO_PLAUSIVEL]
+    return av.reset_index(drop=True)
+
+
 def enriquecer_a_vencer(
     av: pd.DataFrame, cad: pd.DataFrame | None, custo_suges: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
@@ -574,11 +664,16 @@ def enriquecer_a_vencer(
     plausível nos mesmos casos. Junta por (loja, EAN), não (loja, produto)
     -- EAN de verdade, sem a ambiguidade do "Cód. Barras/Etiqueta"."""
     m = av.copy()
-    if cad is not None and not cad.empty and "custo_medio" in cad.columns:
-        cols_cad = ["loja", "produto", "custo_medio"] + (["pvm"] if "pvm" in cad.columns else [])
+    # custo_medio e pvm são independentes -- `cad` vindo do banco
+    # (`load_cadastro_do_banco`) não traz custo_medio (usar
+    # `load_custo_do_banco`, grão EAN, cobertura melhor) mas traz pvm; sem
+    # isso o merge de pvm nunca acontecia quando só faltava custo_medio.
+    if cad is not None and not cad.empty and {"loja", "produto"} <= set(cad.columns):
+        cols_cad = ["loja", "produto"]
+        cols_cad += [c for c in ("custo_medio", "pvm") if c in cad.columns]
         m = m.merge(cad[cols_cad], on=["loja", "produto"], how="left")
-    else:
-        m["custo_medio"] = pd.NA
+    if "custo_medio" not in m.columns:
+        m["custo_medio"] = pd.Series(float("nan"), index=m.index, dtype="float64")
     if custo_suges is not None and not custo_suges.empty:
         m["ean"] = m["cod_barras"].map(_ean_str)
         m = m.merge(custo_suges[["loja", "ean", "custo"]], on=["loja", "ean"], how="left")
@@ -711,6 +806,21 @@ def load_faturamento(src, ano_fallback: int | None = None) -> pd.DataFrame:
     out = out.dropna(subset=["loja", "ano_mes", "faturamento"])
     out = out[out["faturamento"] > 0]
     return out.groupby(["loja", "ano_mes"], as_index=False)["faturamento"].sum()
+
+
+def load_faturamento_do_banco(desde: str = "2026-01-01") -> pd.DataFrame:
+    """Faturamento direto do banco do ERP (itemvenda, TODO produto, com ou
+    sem oferta -- mesmo filtro `status='F'` validado no Painel de Ofertas).
+    -> loja, ano_mes, faturamento (mesma saída de `load_faturamento`)."""
+    import erp_banco
+
+    df = erp_banco.consultar_faturamento_mensal(desde)
+    if df.empty:
+        raise ValueError(f"Banco do ERP devolveu 0 linhas de faturamento desde {desde}.")
+    df["loja"] = pd.to_numeric(df["loja_raw"], errors="coerce")
+    df["faturamento"] = pd.to_numeric(df["faturamento"], errors="coerce")
+    df = df.dropna(subset=["loja", "ano_mes", "faturamento"])
+    return df.groupby(["loja", "ano_mes"], as_index=False)["faturamento"].sum()
 
 
 def load_regionais(src) -> dict:

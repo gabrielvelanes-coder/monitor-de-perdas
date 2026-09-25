@@ -141,3 +141,187 @@ def consultar_custo_produto() -> pd.DataFrame:
     em `core.load_custo_do_banco`."""
     with conectar() as conn:
         return pd.read_sql(CONSULTA_CUSTO_PRODUTO, conn)
+
+
+# Faturamento por loja/mês -- TODO produto, com ou sem oferta (mesma
+# consulta/filtros já validados no Painel de Ofertas,
+# `consultar_venda_geral_mensal`, só sem a coluna de custo que lá é usada
+# pro CMV e aqui não precisa).
+CONSULTA_FATURAMENTO_MENSAL = """
+SELECT to_char(iv.datahora, 'YYYY-MM') AS ano_mes,
+       u.codigo                        AS loja_raw,
+       sum(iv.valortotal)              AS faturamento
+FROM itemvenda iv
+JOIN venda v          ON v.id = iv.vendaid AND v.status = 'F'
+JOIN unidadenegocio u ON u.id = iv.unidadenegocioid
+WHERE iv.status = 'F'
+  AND iv.datahora >= %(desde)s
+GROUP BY 1, 2
+"""
+
+
+def consultar_faturamento_mensal(desde: str = '2026-01-01') -> pd.DataFrame:
+    with conectar() as conn:
+        return pd.read_sql(CONSULTA_FATURAMENTO_MENSAL, conn, params={'desde': desde})
+
+
+# Itens a vencer -- `itemprevencido` (validado 25/09/26): filtro
+# `datavalidade >= hoje` (já vencido não é mais "a vencer", vira Perdas
+# quando alguém baixar) + não encerrado + saldo>0 dá 4.696 lotes contra
+# 4.761 do último arquivo manual -- bate. Sem esse filtro de validade dá
+# 24.942 (tem muito lote já vencido há anos ainda "aberto" no ERP,
+# esperando alguém baixar -- não é o que a tela quer mostrar).
+CONSULTA_ITENS_A_VENCER = """
+SELECT u.codigo                                          AS loja,
+       e.descricao                                        AS produto,
+       ip.lote                                             AS lote,
+       ip.quantidadeinicial                                AS qtd_inicial,
+       COALESCE(ip.quantidademovimentada, 0)               AS qtd_movimentada,
+       (ip.quantidadeinicial - COALESCE(ip.quantidademovimentada, 0)) AS saldo,
+       COALESCE(est.estoque, 0)                            AS estoque_atual,
+       (ip.datavalidade::date - CURRENT_DATE)               AS dias_venc,
+       ip.datavalidade                                      AS data_validade,
+       ip.datafabricacao                                    AS data_fab,
+       e.codigobarras                                       AS cod_barras,
+       pf.nome                                              AS fabricante,
+       c.caminho                                            AS classif,
+       cav.nome                                             AS curva_valor,
+       caq.nome                                             AS curva_qtd
+FROM itemprevencido ip
+JOIN embalagem e            ON e.id = ip.embalagemid
+JOIN unidadenegocio u       ON u.id = ip.unidadenegocioid
+LEFT JOIN produto p          ON p.id = e.produtoid
+LEFT JOIN fabricante f       ON f.id = p.fabricanteid
+LEFT JOIN pessoa pf          ON pf.id = f.pessoaid
+LEFT JOIN classificacaoproduto cp
+       ON cp.produtoid = e.produtoid
+      AND cp.classificacaoid IN (SELECT id FROM classificacao WHERE caminho ILIKE 'ARVORE NOVA%%')
+LEFT JOIN classificacao c    ON c.id = cp.classificacaoid
+LEFT JOIN curvaabcprodutounidadenegocio cpu
+       ON cpu.produtoid = e.produtoid AND cpu.unidadenegocioid = ip.unidadenegocioid
+LEFT JOIN curvaabc cav       ON cav.id = cpu.curvaabcvalorid
+LEFT JOIN curvaabc caq       ON caq.id = cpu.curvaabcquantidadeid
+LEFT JOIN estoque est        ON est.embalagemid = ip.embalagemid AND est.unidadenegocioid = ip.unidadenegocioid
+WHERE ip.status = 'A'
+  AND ip.datahoraencerramento IS NULL
+  AND (ip.quantidadeinicial - COALESCE(ip.quantidademovimentada, 0)) > 0
+  AND ip.datavalidade >= CURRENT_DATE
+"""
+
+
+def consultar_itens_a_vencer() -> pd.DataFrame:
+    with conectar() as conn:
+        return pd.read_sql(CONSULTA_ITENS_A_VENCER, conn)
+
+
+# Catálogo (substitui BASE CADASTRO COM GRUPOS) -- mesmo padrão de
+# classificação/curva ABC (global, sem loja) já usado no
+# cestas-vendas/erp_banco.py CONSULTA_PRODUTOS.
+CONSULTA_CATALOGO = """
+SELECT e.descricao                             AS produto,
+       p.status                                AS status_cadastro,
+       c.caminho                                AS classif_cat,
+       cav.nome                                 AS curva_valor_cat,
+       caq.nome                                 AS curva_qtd_cat,
+       pf.nome                                  AS fabricante_cat
+FROM produto p
+JOIN embalagem e ON e.produtoid = p.id
+LEFT JOIN fabricante f  ON f.id = p.fabricanteid
+LEFT JOIN pessoa pf     ON pf.id = f.pessoaid
+LEFT JOIN classificacaoproduto cp
+       ON cp.produtoid = p.id
+      AND cp.classificacaoid IN (SELECT id FROM classificacao WHERE caminho ILIKE 'ARVORE NOVA%%')
+LEFT JOIN classificacao c ON c.id = cp.classificacaoid
+LEFT JOIN curvaabcproduto cabc ON cabc.produtoid = p.id
+LEFT JOIN curvaabc cav ON cav.id = cabc.curvaabcvalorid
+LEFT JOIN curvaabc caq ON caq.id = cabc.curvaabcquantidadeid
+"""
+
+
+def consultar_catalogo() -> pd.DataFrame:
+    with conectar() as conn:
+        return pd.read_sql(CONSULTA_CATALOGO, conn)
+
+
+# Cadastro (substitui os arquivos DADOS*.xlsx) -- curva ABC POR LOJA
+# (`curvaabcprodutounidadenegocio`, diferente da curva global usada no
+# Catálogo), motivo de suspensão de compra (`suspendecompraprodutounidade
+# negocio`), estoque atual (`estoque`) e 3 métricas CALCULADAS (não são
+# campo direto do ERP, são a melhor aproximação razoável -- ver
+# PENDENCIAS.md pra validar com o Gabriel se bate com o critério real da
+# "Sugestão de Compra" dele):
+#   - mvm (média venda mensal) = unidades vendidas nos últimos 90 dias / 3
+#   - pvm (preço venda médio)  = venda / unidades nos últimos 90 dias
+#   - ult_venda_dias / ult_compra_dias = dias desde a última venda/compra
+#     (histórico de 365 dias) -- estes 2 são inequívocos, sem suposição.
+#
+# Achado 25/09/26: buscar o catálogo INTEIRO x 23 lojas (CROSS JOIN) trazia
+# muito mais linhas do que o DADOS real (produto que a loja nunca teve,
+# sem nenhum sinal) -- trocado por consulta ALVEJADA: só as combinações
+# (loja, produto) que já aparecem em Perdas/Itens a vencer (é só isso que
+# `enriquecer_vencidos`/`enriquecer_a_vencer` realmente cruzam), bem mais
+# rápido e sem ruído.
+CONSULTA_CADASTRO = """
+WITH alvo(loja, produto) AS (
+    SELECT * FROM unnest(%(lojas)s::text[], %(produtos)s::text[])
+),
+venda_ag AS (
+    SELECT u.codigo AS loja, e.produtoid,
+           max(iv.datahora)::date AS ultima_venda,
+           sum(iv.quantidade) FILTER (WHERE iv.datahora >= now() - interval '90 days') AS unid_90d,
+           sum(iv.valortotal) FILTER (WHERE iv.datahora >= now() - interval '90 days') AS venda_90d
+    FROM itemvenda iv
+    JOIN venda v ON v.id = iv.vendaid AND v.status='F'
+    JOIN embalagem e ON e.id = iv.embalagemid
+    JOIN unidadenegocio u ON u.id = iv.unidadenegocioid
+    WHERE iv.status='F' AND iv.datahora >= now() - interval '365 days'
+    GROUP BY u.codigo, e.produtoid
+),
+compra_ag AS (
+    SELECT u.codigo AS loja, hc.produtoid,
+           max(hc.datahoraconsiderada)::date AS ultima_compra
+    FROM historicocusto hc
+    JOIN unidadenegocio u ON u.id = hc.unidadenegocioid
+    WHERE hc.datahoraconsiderada >= now() - interval '365 days'
+    GROUP BY u.codigo, hc.produtoid
+)
+SELECT alvo.loja                         AS loja,
+       alvo.produto                      AS produto,
+       cav.nome                          AS curva_valor,
+       caq.nome                          AS curva_qtd,
+       COALESCE(est.estoque, 0)          AS estoque,
+       mo.descricao                      AS motivo_susp,
+       (CURRENT_DATE - va.ultima_venda)  AS ult_venda_dias,
+       round(COALESCE(va.unid_90d, 0) / 3.0, 2) AS mvm,
+       CASE WHEN COALESCE(va.unid_90d, 0) > 0
+            THEN round(va.venda_90d / va.unid_90d, 4) END AS pvm,
+       (CURRENT_DATE - ca.ultima_compra) AS ult_compra_dias
+FROM alvo
+JOIN unidadenegocio u ON u.codigo = alvo.loja
+JOIN embalagem e       ON e.descricao = alvo.produto
+JOIN produto p          ON p.id = e.produtoid
+LEFT JOIN curvaabcprodutounidadenegocio cpu
+       ON cpu.produtoid = p.id AND cpu.unidadenegocioid = u.id
+LEFT JOIN curvaabc cav ON cav.id = cpu.curvaabcvalorid
+LEFT JOIN curvaabc caq ON caq.id = cpu.curvaabcquantidadeid
+LEFT JOIN estoque est ON est.embalagemid = e.id AND est.unidadenegocioid = u.id
+LEFT JOIN suspendecompraprodutounidadenegocio susp
+       ON susp.produtoid = p.id AND susp.unidadenegocioid = u.id
+LEFT JOIN motivo mo ON mo.id = susp.motivoid
+LEFT JOIN venda_ag va ON va.loja = alvo.loja AND va.produtoid = p.id
+LEFT JOIN compra_ag ca ON ca.loja = alvo.loja AND ca.produtoid = p.id
+"""
+
+
+def consultar_cadastro(pares: list[tuple[str, str]]) -> pd.DataFrame:
+    """`pares`: lista de (loja_codigo_str, produto_descricao) -- as
+    combinações que interessam (de Perdas/Itens a vencer já carregados).
+    Lista vazia -> DataFrame vazio, sem consultar o banco."""
+    if not pares:
+        return pd.DataFrame(columns=["loja", "produto", "curva_valor", "curva_qtd",
+                                      "estoque", "motivo_susp", "ult_venda_dias",
+                                      "mvm", "pvm", "ult_compra_dias"])
+    lojas = [x[0] for x in pares]
+    produtos = [x[1] for x in pares]
+    with conectar() as conn:
+        return pd.read_sql(CONSULTA_CADASTRO, conn, params={'lojas': lojas, 'produtos': produtos})
