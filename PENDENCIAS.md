@@ -1,6 +1,103 @@
 # Pendências e histórico — Monitor de Perdas
 
-## RETOMAR DAQUI (fim da sessão 2026-09-25) — Perdas direto do banco do ERP
+## RETOMAR DAQUI (fim da sessão 2026-09-25, continuação) — as 6 fontes migradas pro banco
+
+Gabriel pediu pra terminar a migração de vez: "quero todas as
+informações sendo buscadas no banco. não quero ficar mais enviando
+planilha." + botão "Atualizar agora". **As 6 fontes que antes eram
+arquivo manual agora vêm do banco do ERP**, cada uma com fallback
+automático pro arquivo se o banco cair (nunca quebra o app):
+
+| Fonte | Tabela(s) do ERP | Constante liga/desliga |
+|---|---|---|
+| Perdas | `baixaestoque`+`itembaixaestoque`+`motivo` | `USAR_BANCO_PERDAS` |
+| Custo | `custoproduto` | `USAR_BANCO_CUSTO` |
+| Itens a vencer | `itemprevencido` | `USAR_BANCO_AVENCER` |
+| Cadastro (DADOS) | `curvaabcprodutounidadenegocio`+`suspendecompraprodutounidadenegocio`+`estoque`+cálculo | `USAR_BANCO_CADASTRO` |
+| Catálogo | `classificacaoproduto`+`curvaabcproduto` | `USAR_BANCO_CATALOGO` |
+| Faturamento | `itemvenda` agregado | `USAR_BANCO_FATURAMENTO` |
+
+**Botão "Atualizar agora"** na sidebar (topo, sempre visível) — limpa o
+cache dos 6 caches de banco e busca de novo na hora, sem esperar os 15
+minutos do TTL (`st.cache_data(ttl=900)` em todos).
+
+**Cadastro (DADOS) — a peça mais grande, decisões tomadas:**
+- `curva_valor`/`curva_qtd` POR LOJA (`curvaabcprodutounidadenegocio`,
+  diferente da curva GLOBAL usada no Catálogo) e `motivo_susp`
+  (`suspendecompraprodutounidadenegocio` → `motivo`) são campo direto
+  do ERP — sem suposição.
+- `mvm` (média venda mensal), `pvm` (preço venda médio),
+  `ult_venda_dias`, `ult_compra_dias` são **calculados** (não são campo
+  direto): mvm/pvm sobre os últimos 90 dias de `itemvenda`;
+  ult_venda_dias/ult_compra_dias são inequívocos (dias desde a
+  última venda/compra em `itemvenda`/`historicocusto`, sem suposição
+  nenhuma), só mvm/pvm têm uma escolha de janela (90 dias) que
+  **ainda não foi confirmada com o Gabriel** se bate com o critério
+  real da "Sugestão de Compra" do ERP — vale perguntar se ele notar
+  giro/mvm estranho.
+- **Não busca o catálogo inteiro x 23 lojas** — só as combinações
+  (loja, produto) que Perdas + Itens a vencer já carregaram (achado:
+  a busca sem filtro trazia MUITO mais linhas que os arquivos DADOS
+  reais tinham, produto que a loja nunca teve nenhum sinal). `custo_medio`
+  não vem mais do Cadastro (usar `load_custo_do_banco`, grão EAN, bem
+  melhor cobertura).
+
+**2 bugs reais achados e corrigidos no caminho (ambos confirmados com
+dado real antes de fechar):**
+1. **Código de loja sem zero à esquerda.** `str(int(loja))` dava "7" em
+   vez de "07" (como `unidadenegocio.codigo` guarda) — o JOIN do
+   Cadastro falhava silenciosamente pra TODA loja de 1 dígito (lojas
+   2-9). Resultado: 3.165 de 8.106 pares pedidos sem NENHUM match,
+   `sem_cadastro` inflado pra 37% (deveria ser bem menor). Corrigido
+   com `.zfill(2)`; `sem_cadastro` caiu pra 4,2% depois do fix — número
+   plausível.
+2. **1 lote com quantidade absurda no próprio ERP.** LANCETA ACCU CHEK
+   FASTCLIX, lote `WPK193A`, loja 11: `quantidadeinicial = 31.122.025`
+   (o 2º maior saldo real de todo o banco é 119 — 260 mil vezes menor).
+   O mesmo lote no arquivo manual antigo tinha saldo=1 numa loja
+   diferente (9) — é erro de digitação recente na origem, não bug
+   nosso. Sem filtro, esse 1 registro sozinho inflava "Estoque exposto"
+   de ~R$300 mil pra **R$1,7 BILHÃO** (achado testando no navegador,
+   não só por script). `LIMITE_SALDO_PLAUSIVEL = 100.000` novo em
+   `core.py` (bem folgado, nunca excluiria um saldo real já visto) —
+   blinda contra esse tipo de erro de digitação. **Vale o Gabriel
+   corrigir esse lote direto no ERP quando puder** (não afeta mais a
+   ferramenta, mas o dado errado continua lá na origem).
+
+**1 bug menor corrigido no caminho:** `pvm` (usado no 2º nível do
+resgate automático de custo) nunca chegava no cálculo quando
+`custo_medio` faltava no cadastro — os 2 campos vinham do mesmo merge
+condicional (`"custo_medio" in cad.columns`), então faltando um dos
+dois o outro também sumia. Desacoplados em `enriquecer_a_vencer`.
+
+**Validado com o pipeline inteiro, dado real, e confirmado ao vivo no
+Chrome nas 3 telas (Painel, Anatomia, Itens a vencer) depois dos 2
+fixes:**
+- Painel: faturamento 9 meses R$77,4M (agora inclui setembro — antes
+  ficava de fora por falta de `faturamento.csv`; e inclui a loja 12,
+  que não entrava no arquivo antigo), perda R$494.554, taxa 0,64%.
+- Anatomia: 9.005 linhas, medicamento 50% / não-medicamento 50%.
+- Itens a vencer: **R$300.381 de estoque exposto** (bate com o
+  histórico documentado, ~R$277-396 mil), 4.707 lotes, **0 EAN
+  inválido** (era 8 no arquivo antigo — o banco usa
+  `embalagem.codigobarras`, o EAN de verdade, sem a ambiguidade
+  "Código/Etiqueta" que o relatório manual tinha), 0 custo zerado sem
+  solução, 38 preços resgatados automaticamente.
+
+**Pendências reais que ficam:**
+- Confirmar com o Gabriel se a janela de 90 dias pra mvm/pvm faz
+  sentido (ou se ele quer outro critério, tipo o mesmo do ERP).
+- Sugerir ao Gabriel corrigir o lote WPK193A (LANCETA ACCU CHEK, loja
+  11) no ERP — quantidade errada na origem.
+- `sem_cadastro` em 4,2% (278 de 6.581 no escopo "vencido") — residual
+  plausível (produto sem venda/curva no período de 365 dias
+  considerado), não investigado item a item.
+- Servidor rodando só local (`localhost:8501`) — perguntar se quer
+  expor na rede (mesmo processo dos outros 3 projetos,
+  `iniciar_para_rede.bat` + `ALLOWED_HOSTS`/`.gitignore` equivalente)
+  se quiser acesso de outras pessoas.
+
+## CONCLUÍDO NESTA SESSÃO (2026-09-25, 1ª parte) — Perdas direto do banco do ERP
 
 Gabriel pediu pra trazer os dados do banco do ERP (mesmo banco Postgres já
 usado no [[projeto-painel-ofertas]] e no [[projeto-cestas-vendas]] — ver
