@@ -398,6 +398,36 @@ def load_base_suges(sources, use_cache: bool = True) -> pd.DataFrame:
     return m
 
 
+def load_custo_do_banco() -> pd.DataFrame:
+    """Custo direto do banco do ERP (`custoproduto` -- custo atual por
+    produto x loja, ver `erp_banco.py`) -- mesma saída de `load_base_suges`
+    (loja, ean, custo), serve como substituto dela em `enriquecer_a_vencer`/
+    `calcular_fallback_custo` sem precisar mudar mais nada. Prioriza
+    `customedio` (custo médio ponderado, mais estável) sobre `custo`
+    (última compra); cai pro `custo` só quando `customedio` não é válido.
+    Achado 25/09/26: melhor fonte que a "base suges" -- ver
+    `erp_banco.CONSULTA_CUSTO_PRODUTO` e PENDENCIAS.md pra validação."""
+    import erp_banco
+
+    df = erp_banco.consultar_custo_produto()
+    if df.empty:
+        raise ValueError("Banco do ERP devolveu 0 linhas de custoproduto.")
+
+    df["loja"] = pd.to_numeric(df["loja_raw"], errors="coerce")
+    df["ean"] = df["ean"].astype(str).str.strip()
+    df = df[df["ean"].map(_ean_valido)]
+
+    df["custo"] = pd.to_numeric(df["custo"], errors="coerce")
+    df["customedio"] = pd.to_numeric(df["customedio"], errors="coerce")
+    custo_final = df["customedio"].where(df["customedio"] > 0.01, df["custo"])
+
+    m = df.assign(custo=custo_final)
+    m = m.dropna(subset=["loja"])
+    m = m[m["custo"] > 0.01]
+    m = m.drop_duplicates(["loja", "ean"])[["loja", "ean", "custo"]].reset_index(drop=True)
+    return m
+
+
 # catálogo nível-produto (BASE CADASTRO COM GRUPOS) — sem loja, chave = descrição
 _CAT_MAP = [
     ("produto",          lambda n: n in ("DESCRICAO", "PRODUTO")),

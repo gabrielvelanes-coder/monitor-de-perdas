@@ -108,3 +108,36 @@ def consultar_baixa_estoque(desde: str = '2026-01-01') -> pd.DataFrame:
     etc.), feito em `core.load_perdas_do_banco`."""
     with conectar() as conn:
         return pd.read_sql(CONSULTA_BAIXA_ESTOQUE, conn, params={'desde': desde})
+
+
+# `custoproduto` -- custo ATUAL por produto x loja, mantido pelo próprio ERP
+# (não é um relatório de sugestão de compra com propósito diferente).
+# Achado e validado em 25/09/26 (ver PENDENCIAS.md): nunca tem custo/
+# customedio nulo ou <=0 nas 706 mil linhas -- diferente do "Custo Médio"
+# do DADOS, que vem zerado/quase-zero em ~26% da base sem motivo aparente.
+# Cobertura por (produto, loja) não é 100% -- quando a própria loja nunca
+# comprou o item diretamente, não tem linha lá (não é zero, é ausência);
+# testado contra 28.450 itens de custo inválido no DADOS: 89,6% resolvido
+# combinando `custoproduto` com o fallback já existente em
+# `core.calcular_fallback_custo` (maior custo do mesmo EAN em outra loja).
+# `historicocusto` é só o log de eventos (1 por nota fiscal/recebimento)
+# por trás do `custoproduto` -- não precisa consultar direto, o
+# `custoproduto` já é o resumo/atual que ele alimenta.
+CONSULTA_CUSTO_PRODUTO = """
+SELECT u.codigo        AS loja_raw,
+       e.codigobarras  AS ean,
+       cp.custo        AS custo,
+       cp.customedio   AS customedio
+FROM custoproduto cp
+JOIN embalagem e         ON e.produtoid = cp.produtoid
+JOIN unidadenegocio u    ON u.id = cp.unidadenegocioid
+WHERE e.codigobarras IS NOT NULL
+"""
+
+
+def consultar_custo_produto() -> pd.DataFrame:
+    """-> DataFrame cru do banco (loja_raw, ean, custo, customedio) --
+    pós-processado (EAN validado, loja numérica, escolha custo/customedio)
+    em `core.load_custo_do_banco`."""
+    with conectar() as conn:
+        return pd.read_sql(CONSULTA_CUSTO_PRODUTO, conn)

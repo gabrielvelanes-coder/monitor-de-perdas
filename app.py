@@ -49,6 +49,10 @@ MOSTRAR_FONTES_DADOS = False  # uploaders manuais na sidebar — ocultos a pedid
 # só o arquivo manual, troque pra False.
 USAR_BANCO_PERDAS = True
 PERDAS_BANCO_DESDE = "2026-01-01"
+# Custo direto do banco do ERP (custoproduto — custo atual por produto x
+# loja), em vez da "base suges" (arquivo manual). Mesmo esquema de
+# fallback automático do USAR_BANCO_PERDAS.
+USAR_BANCO_CUSTO = True
 # (2026-09-12): o fluxo real é sempre soltar o arquivo na pasta (auto-detect);
 # vira True de novo se precisar testar um relatório pontual sem renomear/mover.
 MOSTRAR_DIGITAR_FATURAMENTO = False  # editor manual de faturamento — oculto a
@@ -142,6 +146,11 @@ def _custo_suges(paths, sig):
     return core.load_base_suges(list(paths))
 
 
+@st.cache_data(show_spinner="Buscando custo no banco do ERP…", ttl=900)
+def _custo_banco():
+    return core.load_custo_do_banco()
+
+
 @st.cache_data(show_spinner="Lendo faturamento…")
 def _fat_arquivo(path, mtime):
     return core.load_faturamento(path)
@@ -224,13 +233,24 @@ def build_context() -> dict:
         sig = tuple((Path(x).name, Path(x).stat().st_size) for x in auto_c)
         cad = _cadastro(tuple(auto_c), sig)
 
-    # base de custo "sugestão de compra" (opcional) -- fonte de custo mais
-    # confiável que o "Custo Médio" do DADOS, ver `core.load_base_suges`
-    auto_suges = _achar("base suges*.xlsx", "*sugest*compra*.xlsx")
-    custo_suges = None
-    if auto_suges:
-        sig_suges = tuple((Path(x).name, Path(x).stat().st_size) for x in auto_suges)
-        custo_suges = _custo_suges(tuple(auto_suges), sig_suges)
+    # custo (opcional) -- banco do ERP em 1º lugar (`custoproduto`, custo
+    # atual por produto x loja, ver `core.load_custo_do_banco`), cai pra
+    # "base suges" (arquivo manual) se o banco falhar ou estiver desligado
+    # (USAR_BANCO_CUSTO = False). Fonte mais confiável que o "Custo Médio"
+    # do DADOS nos dois casos.
+    fonte_custo = custo_suges = None
+    if USAR_BANCO_CUSTO:
+        try:
+            custo_suges = _custo_banco()
+            fonte_custo = "banco do ERP (ao vivo)"
+        except Exception:
+            pass
+    if custo_suges is None:
+        auto_suges = _achar("base suges*.xlsx", "*sugest*compra*.xlsx")
+        if auto_suges:
+            sig_suges = tuple((Path(x).name, Path(x).stat().st_size) for x in auto_suges)
+            custo_suges = _custo_suges(tuple(auto_suges), sig_suges)
+            fonte_custo = "\"base suges\" (arquivo)" + (" — banco do ERP indisponível" if USAR_BANCO_CUSTO else "")
 
     # catálogo nível-produto (opcional) — só enriquece classif/curva
     auto_cat = _achar("BASE CADASTRO COM GRUPOS.xlsx", "*GRUPOS*.xlsx",
@@ -316,7 +336,7 @@ def build_context() -> dict:
                 meses_sel=meses_sel, psig=psig, csig=csig, catsig=catsig,
                 itens_a_vencer=itens_a_vencer, fonte_av=fonte_av,
                 fonte_av_mtime=fonte_av_mtime, loja_regional=loja_regional,
-                custo_suges=custo_suges)
+                custo_suges=custo_suges, fonte_custo=fonte_custo)
 
 
 def _editor_faturamento(perdas, fat):
@@ -1338,9 +1358,9 @@ def tela_itens_a_vencer():
         st.caption(":material/info: Sem cadastro (DADOS) carregado — mostrando só "
                    "unidades, sem valor em R$ (falta o custo médio por loja/produto).")
     if CTX["custo_suges"] is not None:
-        st.caption(":material/verified: Usando custo da base \"sugestão de compra\" "
-                   "quando disponível (mais confiável que o Custo Médio do DADOS — "
-                   "cai pro Custo Médio só quando faltar).")
+        st.caption(f":material/verified: Usando custo do {CTX['fonte_custo']} quando "
+                   "disponível (mais confiável que o Custo Médio do DADOS — cai pro "
+                   "Custo Médio só quando faltar).")
     if "saldo" not in enr.columns:
         st.caption(":material/warning: Relatório sem coluna **Saldo** — usando "
                    "**Estoque atual** (estoque geral, não restrito ao lote "
