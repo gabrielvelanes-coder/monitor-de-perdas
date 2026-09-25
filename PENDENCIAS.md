@@ -84,9 +84,27 @@ fixes:**
   "Código/Etiqueta" que o relatório manual tinha), 0 custo zerado sem
   solução, 38 preços resgatados automaticamente.
 
+**Pra que serve `mvm` (média de venda mensal) — Gabriel perguntou,
+resposta registrada:** não é métrica nova, já existia desde o
+`DADOS.xlsx` — só trocou de fonte nesta migração. `mvm` (+
+`ult_venda_dias`) alimenta o **balde** da Anatomia da perda (PDV /
+Compra / Cadastro / Sem cadastro, `classificar_vencidos` em `core.py`):
+item que vendia bem (mvm alto, venda recente) e mesmo assim venceu na
+prateleira = falha de **execução de loja** (balde "pdv" — devia ter
+girado e não girou); item que quase não vendia e venceu = problema de
+**compra em excesso** ou **cadastro** (comprou mais que a demanda real,
+ou ficou suspenso/parado), não é culpa da loja. É essa conta que gera a
+frase do Diagnóstico no Painel ("Apenas 5% é item com giro que venceu
+na gôndola — a alavanca está na compra e no cadastro, não na disciplina
+de loja"). Sem `mvm` a ferramenta não consegue separar essas 2 causas,
+que é a pergunta que o Gabriel quer responder (onde agir: treinar
+equipe, ou ajustar compra/cadastro).
+
 **Pendências reais que ficam:**
 - Confirmar com o Gabriel se a janela de 90 dias pra mvm/pvm faz
-  sentido (ou se ele quer outro critério, tipo o mesmo do ERP).
+  sentido (ou se ele quer outro critério, tipo o mesmo do ERP) — é só a
+  JANELA de cálculo que é suposição minha, o USO do mvm (balde da
+  Anatomia) já existia antes e não muda.
 - Sugerir ao Gabriel corrigir o lote WPK193A (LANCETA ACCU CHEK, loja
   11) no ERP — quantidade errada na origem.
 - `sem_cadastro` em 4,2% (278 de 6.581 no escopo "vencido") — residual
