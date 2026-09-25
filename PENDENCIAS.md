@@ -1,5 +1,54 @@
 # Pendências e histórico — Monitor de Perdas
 
+## RETOMAR DAQUI (fim da sessão 2026-09-17)
+
+Tudo commitado (5 commits desde o README anterior, ainda não enviados ao
+GitHub — `git push` pendente), working tree limpa. App sobe em
+`localhost:8501`. Frentes reais resolvidas nesta sessão, todas em torno
+de "Itens a vencer" → preço sugerido → arquivo de importação do ERP:
+
+**1. Código inválido no arquivo de importação (`57bf0b5`).** O relatório
+usa a coluna "Cod. Barras/Etiqueta", que mistura EAN de verdade com
+código interno de etiqueta quando o lote não tem EAN cadastrado — o
+arquivo gerado saía com código de etiqueta (ex. "38493") em vez de EAN,
+e o ERP rejeitava o arquivo **inteiro** por causa de 1 linha ruim.
+`_ean_valido()` novo (8+ dígitos) filtra esses casos antes de montar os
+4 arquivos; UI avisa quantos itens ficaram de fora e por quê.
+
+**2. Preço sugerido virou editável (`fd3567a`).** Coluna "Preço
+sugerido" da tabela Itens virou `st.data_editor` — edição fica em
+`session_state` por (EAN, faixa), sobrescreve o cálculo tanto na tela
+quanto nos 4 arquivos baixados, com botão "Desfazer edições".
+
+**3. Custo inválido (zerado/negativo/<1 centavo) excluído (`b73583f`)
++ resgate automático (`8f0b2da`).** `sugerir_preco()` passou a exigir
+custo>0 E preço final ≥R$0,01 (ERP recusa preço abaixo disso). Pra não
+simplesmente descartar o item, `calcular_fallback_custo()` tenta em 2
+níveis: (1) maior custo válido do mesmo EAN em OUTRA loja, (2) Preço
+Venda Médio (já no cadastro) com o mesmo fator de desconto, se não
+houver custo válido em loja nenhuma. **Bug real corrigido no caminho:**
+em `exportar_erp_precos`, os overrides (edição manual) eram aplicados
+DEPOIS de descartar linha sem preço válido — um item que só existia
+graças à edição manual ou ao resgate automático nunca recebia o preço
+(a linha já tinha sumido antes de aplicar o override). Resultado real:
+custo inválido sem solução caiu de 55 para 2 itens.
+
+**4. Fonte de custo trocada (`bc80dce`).** Achado real: o campo "Custo
+Médio" do DADOS fica zerado/quase-zero sem motivo em ~26% da base — mas
+a coluna "Custo" de uma base NOVA (planilha "base suges", sugestão de
+compra do ERP, ~353 mil linhas) é plausível nos mesmos casos onde
+"Custo Médio" falha. `load_base_suges()` novo (cache parquet);
+`enriquecer_a_vencer` passou a juntar por (loja, EAN) em vez de (loja,
+produto), usando "Custo" da base nova como prioridade e caindo pro
+Custo Médio do DADOS só quando faltar.
+
+**5. Botão de limpar busca (`4bad6a5`).** "x" ao lado de "Buscar
+(produto ou EAN)" em Itens a vencer, sem precisar apagar manualmente.
+
+Sem nenhuma pendência de código aberta desta rodada — próxima frente é
+faturamento de setembro (quando fechar) e, a partir de 25/09/26,
+integração com o banco do ERP (ver seção abaixo).
+
 ## Infraestrutura — backup (16/09/26)
 
 Repositório não tinha remoto (só commits locais) — criado
@@ -13,7 +62,7 @@ rodadas mais recentes. Mesmo processo aplicado no projeto Monitor de
 Preço de Mercado (`OneDrive\Área de Trabalho\MONITOR DE PRECOS\
 monitor-precos`) no mesmo dia.
 
-## RETOMAR DAQUI (fim da sessão 2026-09-14)
+## CONCLUÍDO NESTA SESSÃO (fim da sessão 2026-09-14)
 
 Tudo commitado, working tree limpa, app rodando em `localhost:8501` com o
 código mais recente. Frentes em aberto pra continuar:
