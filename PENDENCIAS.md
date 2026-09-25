@@ -64,11 +64,46 @@ defasagem temporal (planilha é uma foto de um momento anterior). Não
 bloqueia o uso — só registrar caso o Gabriel pergunte por que os
 números mudaram um pouco depois da troca de fonte.
 
+**Custo também migrado no mesmo dia (25/09/26), mas de uma tabela
+MELHOR do que a mapeada inicialmente.** Gabriel achou sozinho no banco
+(explorando por fora) as tabelas `custoproduto` (custo ATUAL por
+produto x loja, mantido pelo próprio ERP) e `historicocusto` (log de
+eventos por trás dela, 1 por nota fiscal/recebimento) e perguntou se
+não fazia mais sentido usar essas em vez da "base suges" (sugestão de
+compra) que eu tinha mapeado. **Fazia — investiguei e troquei:**
+- `custoproduto` nunca tem `custo`/`customedio` nulo ou ≤0 nas 706 mil
+  linhas (vs. ~26% zerado/quase-zero no "Custo Médio" do DADOS/base
+  suges). Cobertura por (produto, loja) não é 100% — quando a própria
+  loja nunca comprou o item diretamente não tem linha lá (ausência, não
+  zero) — mas testado contra os 28.450 itens de custo inválido de um
+  arquivo DADOS real: **89,6% resolvido** só combinando `custoproduto`
+  com o fallback que já existia (`calcular_fallback_custo`, maior custo
+  do mesmo EAN em outra loja).
+- `erp_banco.consultar_custo_produto()` + `core.load_custo_do_banco()`
+  (mesma saída de `load_base_suges`: loja/ean/custo — substituto
+  direto, sem precisar mudar `enriquecer_a_vencer`/
+  `calcular_fallback_custo`). Prioriza `customedio` (ponderado, mais
+  estável) sobre `custo` (última compra).
+- `app.py`: `USAR_BANCO_CUSTO = True`, mesmo esquema de fallback
+  automático pro arquivo "base suges" se o banco falhar. Caption da
+  tela Itens a vencer mostra a fonte real (`CTX['fonte_custo']`).
+- **Validado com o pipeline inteiro, dado real** (`load_itens_a_vencer`
+  → `enriquecer_a_vencer` → `enriquecer_precos` →
+  `calcular_fallback_custo` → `exportar_erp_precos`, os 4.761 itens do
+  arquivo atual): custo inválido sem solução ficou em **2** (igual ao
+  melhor resultado já alcançado, mas agora sem precisar do arquivo de
+  88MB), só 8 de 4.761 sem custo médio, fallback resgatou 32. Não deu
+  pra confirmar visualmente no navegador desta vez (extensão do Chrome
+  desconectada na hora) — só validação direta do pipeline via script,
+  pedir confirmação visual do Gabriel na próxima sessão.
+- `historicocusto` não foi usado diretamente — é só o log por trás do
+  `custoproduto`, que já é o resumo/atual que interessa aqui.
+
 **Próximo passo, quando o Gabriel pedir:** repetir o mesmo processo pra
-Itens a vencer (`itemprevencido`), Custo (`sugestaocompra`),
-Faturamento (reaproveitar `consultar_venda_geral_mensal` já pronto no
-painel-ofertas) e Catálogo (reaproveitar `CONSULTA_PRODUTOS` já pronto
-no cestas-vendas).
+Itens a vencer (`itemprevencido`), Faturamento (reaproveitar
+`consultar_venda_geral_mensal` já pronto no painel-ofertas) e Catálogo
+(reaproveitar `CONSULTA_PRODUTOS` já pronto no cestas-vendas). Custo já
+está feito (ver acima).
 
 ## CONCLUÍDO NESTA SESSÃO (fim da sessão 2026-09-17)
 
