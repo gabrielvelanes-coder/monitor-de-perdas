@@ -223,6 +223,39 @@ def load_perdas(src) -> pd.DataFrame:
     return df[cols].reset_index(drop=True)
 
 
+def load_perdas_do_banco(desde: str = "2026-01-01") -> pd.DataFrame:
+    """Mesma saída de `load_perdas` (loja, ano_mes, produto, motivo, ...),
+    só que direto do banco do ERP (`erp_banco.consultar_baixa_estoque`) em
+    vez do .xls exportado à mão -- ver `erp_banco.py` pro mapeamento de
+    tabelas e a validação feita em 25/09/26 (bate ~99% com a planilha)."""
+    import erp_banco
+
+    df = erp_banco.consultar_baixa_estoque(desde)
+    if df.empty:
+        raise ValueError("Banco do ERP devolveu 0 linhas de baixa de estoque "
+                          f"desde {desde} — confira a data ou o filtro de status.")
+
+    df["loja_raw"] = df["loja_raw"].astype(str).str.strip()
+    df["is_dep"] = df["loja_raw"].str.upper().eq("DEP")
+    df["loja"] = pd.to_numeric(df["loja_raw"], errors="coerce")
+
+    df["itens"] = pd.to_numeric(df["itens"], errors="coerce")
+    df["valor_total"] = pd.to_numeric(df["valor_total"], errors="coerce")
+    df["valor_unit"] = (df["valor_total"] / df["itens"]).where(df["itens"] > 0)
+
+    df["produto"] = df["produto"].astype(str).str.strip()
+    df["motivo"] = df["motivo"].astype(str).str.strip()
+    df["motivo_cat"] = df["motivo"].map(classify_motivo)
+    df["motivo_label"] = df["motivo_cat"].map(LABEL)
+    df["is_perda_real"] = df["motivo_cat"].map(IS_PERDA_REAL)
+
+    df = df.dropna(subset=["valor_total"])
+    cols = ["loja", "loja_raw", "is_dep", "ano_mes", "produto", "motivo",
+            "motivo_cat", "motivo_label", "is_perda_real", "itens",
+            "valor_unit", "valor_total"]
+    return df[cols].reset_index(drop=True)
+
+
 # ----------------------------------------------------------------------------- #
 # 3. carga do cadastro de produtos (com cache em parquet)
 # ----------------------------------------------------------------------------- #

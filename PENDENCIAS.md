@@ -1,6 +1,76 @@
 # Pendências e histórico — Monitor de Perdas
 
-## RETOMAR DAQUI (fim da sessão 2026-09-17)
+## RETOMAR DAQUI (fim da sessão 2026-09-25) — Perdas direto do banco do ERP
+
+Gabriel pediu pra trazer os dados do banco do ERP (mesmo banco Postgres já
+usado no [[projeto-painel-ofertas]] e no [[projeto-cestas-vendas]] — ver
+[[projeto-integracao-sql-server]]), começando só pela fonte **Perdas**
+(as outras 4 — Itens a vencer, Custo, Faturamento, Catálogo — ficam pra
+depois, decisão explícita dele).
+
+**Tabelas achadas e validadas:** `baixaestoque` (1 por baixa: loja,
+motivo, data) + `itembaixaestoque` (1 por produto dentro da baixa:
+quantidade/valor) + `motivo` (descrição) — equivalente exato do
+relatório "Análise de Baixa de Estoque" (.xls) que era exportado à mão.
+Validado: 1 linha específica (loja 02, ABS LONGO MODERADO, set/26,
+motivo PRODUTO VENCIDO) bate **exato** contra o .xls (2 itens,
+R$13,92); soma jan-set/26 bate a **0,9%** (banco R$497.294 vs planilha
+R$492.727 — diferença esperada, a planilha é um extrato estático de uma
+data anterior, o banco é a foto atual). Filtro `status='F'` nas duas
+tabelas é obrigatório (mesmo achado do painel-ofertas pra
+`venda`/`itemvenda`: sem ele, baixa cancelada ou aberta entra na soma).
+Também achei (não implementado ainda, registrado pra quando for a vez
+das outras fontes): `itemprevencido` (lote/validade/quantidade —
+bate exato com os campos que "Itens a vencer" já espera) e
+`sugestaocompra` (provável correspondente da planilha "base suges" de
+custo).
+
+**Implementado (sem commit ainda no momento de escrever isto):**
+- `erp_banco.py` (novo, raiz do projeto) — conexão somente leitura
+  (mesmo padrão dos outros 2 projetos: `.env` fora do Git,
+  `default_transaction_read_only=on`), `consultar_baixa_estoque(desde)`.
+  Diferente dos outros 2 (Django), este projeto é Streamlit puro — lê o
+  `.env` relativo ao próprio arquivo, sem `settings.BASE_DIR`.
+- `core.load_perdas_do_banco(desde)` — mesma saída de `load_perdas`
+  (loja, ano_mes, produto, motivo, motivo_cat, is_dep, itens,
+  valor_unit, valor_total), só que a partir do banco. Reaproveita
+  `classify_motivo` sem mudança — o vocabulário de motivo do banco já é
+  o mesmo do .xls (mesma fonte).
+- `app.py`: banco em 1º lugar (`USAR_BANCO_PERDAS = True`, constante no
+  topo do arquivo — trocar pra `False` volta a usar só o arquivo),
+  cai pro `.xls`/upload manual automaticamente se o banco falhar
+  (rede, credencial) — nunca quebra o app por causa do banco. Upload
+  manual continua tendo prioridade sobre os dois (ação explícita do
+  usuário). Cache `st.cache_data(ttl=900)` — recarrega do banco a cada
+  15 min, mesmo padrão de TTL já usado no resto do app. Caption "Fonte
+  das perdas: Banco do ERP (ao vivo)" no topo do Painel, pra ficar claro
+  de onde o dado está vindo.
+- `.env`/`.env.exemplo` (`.env` fora do Git) — mesma senha do Painel de
+  Ofertas/Cestas & Vendas/DBeaver. `requirements.txt`:
+  `psycopg[binary]>=3.2`.
+
+**Validado ao vivo (não só curl):** Painel mostra "Fonte das perdas:
+Banco do ERP (ao vivo)", números reais (faturamento R$69,69M/8 meses,
+perda R$458.237, taxa 0,66%), setembro corretamente sinalizado como
+"sem faturamento" (mês ainda não fechou). Anatomia da perda também
+funcionando com o dado do banco cruzado com o cadastro/catálogo
+(medicamento 50% / não-medicamento 47% / sem classificação 3%,
+9.005 linhas). `streamlit.testing` smoke test: 0 exceções.
+
+**Pendência real, não resolvida ainda:** a diferença de 0,9% entre
+banco e planilha não foi investigada a fundo (lojas 21/ESC não
+explicam — testado, contribuem ~R$0 no período). Mais provável é só
+defasagem temporal (planilha é uma foto de um momento anterior). Não
+bloqueia o uso — só registrar caso o Gabriel pergunte por que os
+números mudaram um pouco depois da troca de fonte.
+
+**Próximo passo, quando o Gabriel pedir:** repetir o mesmo processo pra
+Itens a vencer (`itemprevencido`), Custo (`sugestaocompra`),
+Faturamento (reaproveitar `consultar_venda_geral_mensal` já pronto no
+painel-ofertas) e Catálogo (reaproveitar `CONSULTA_PRODUTOS` já pronto
+no cestas-vendas).
+
+## CONCLUÍDO NESTA SESSÃO (fim da sessão 2026-09-17)
 
 Tudo commitado (5 commits desde o README anterior, ainda não enviados ao
 GitHub — `git push` pendente), working tree limpa. App sobe em

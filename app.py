@@ -43,6 +43,12 @@ CLASSE_COR = {"Vencido": "#F87171", "Outra perda direta": "#FB923C", "Baixa come
 ESCOPO_PADRAO = "todos"  # perda = toda baixa do sistema; Painel deixa trocar
 META_PADRAO = 0.004  # 0,40% do faturamento
 MOSTRAR_FONTES_DADOS = False  # uploaders manuais na sidebar — ocultos a pedido
+# Perdas direto do banco do ERP (baixa de estoque + motivo), em vez do .xls
+# exportado à mão — ver erp_banco.py. Se o banco falhar (rede, credencial),
+# cai pro .xls/upload automaticamente, sem quebrar o app. Pra voltar a usar
+# só o arquivo manual, troque pra False.
+USAR_BANCO_PERDAS = True
+PERDAS_BANCO_DESDE = "2026-01-01"
 # (2026-09-12): o fluxo real é sempre soltar o arquivo na pasta (auto-detect);
 # vira True de novo se precisar testar um relatório pontual sem renomear/mover.
 MOSTRAR_DIGITAR_FATURAMENTO = False  # editor manual de faturamento — oculto a
@@ -116,6 +122,11 @@ def _perdas(path, mtime):
     return core.load_perdas(path)
 
 
+@st.cache_data(show_spinner="Buscando perdas no banco do ERP…", ttl=900)
+def _perdas_banco(desde: str):
+    return core.load_perdas_do_banco(desde)
+
+
 @st.cache_data(show_spinner="Lendo cadastro (1ª vez demora)…")
 def _cadastro(paths, sig):
     return core.load_cadastro(list(paths))
@@ -176,16 +187,32 @@ def build_context() -> dict:
             up_f = st.file_uploader("Faturamento (.csv/.xlsx)", type=["csv", "xlsx"])
             up_av = st.file_uploader("Itens a vencer (.xlsx/.csv)", type=["xlsx", "csv"])
 
-    # perdas (obrigatório)
+    # perdas (obrigatório) — banco do ERP em 1º lugar (ao vivo), cai pro
+    # .xls/upload manual se o banco falhar ou estiver desligado
+    # (USAR_BANCO_PERDAS = False). Upload manual sempre tem prioridade
+    # sobre os dois — é uma ação explícita do usuário.
     auto_p = _achar("perdas*.xls", "perdas*.xlsx", "*Baixa*Estoque*.xls*")
+    perdas = fonte = erro_banco = None
     if up_p is not None:
         perdas, fonte = core.load_perdas(up_p), up_p.name
-    elif auto_p:
+    elif USAR_BANCO_PERDAS:
+        try:
+            perdas = _perdas_banco(PERDAS_BANCO_DESDE)
+            fonte = "Banco do ERP (ao vivo)"
+        except Exception as e:
+            erro_banco = str(e)
+
+    if perdas is None and auto_p:
         perdas = _perdas(auto_p[0], Path(auto_p[0]).stat().st_mtime)
         fonte = Path(auto_p[0]).name
-    else:
-        st.error("Coloque o relatório de perdas na pasta ou envie na barra lateral.",
-                 icon=":material/upload_file:")
+        if erro_banco:
+            fonte += " (banco do ERP indisponível, usando arquivo)"
+
+    if perdas is None:
+        msg = "Coloque o relatório de perdas na pasta ou envie na barra lateral."
+        if erro_banco:
+            msg = f"Banco do ERP indisponível ({erro_banco}) e nenhum arquivo de perdas encontrado. " + msg
+        st.error(msg, icon=":material/upload_file:")
         st.stop()
 
     # cadastro (opcional)
@@ -422,6 +449,7 @@ def _vclass_recorte(cats):
 # =========================================================================== #
 def tela_veredito():
     st.title("Painel")
+    st.caption(f"Fonte das perdas: {CTX['fonte']}")
     meta, incluir_dep = CTX["meta"], CTX["incluir_dep"]
 
     # ---- filtros da tela: escopo, regional, mês e loja (recorte global) - #

@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 _smoke.log
 _run.log
+.env
 # dados brutos (grandes / sensíveis) — ficam só na máquina
 DADOS*.xlsx
 BASE CADASTRO*.xlsx
